@@ -317,9 +317,13 @@ def main():
             net.load_state_dict(checkpoint['model'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             contrast.load_state_dict(checkpoint['contrast'])
-            if args.amp and checkpoint['opt'].amp:
-                print('==> resuming amp state_dict')
-                amp.load_state_dict(checkpoint['amp'])
+            try:
+                if args.amp and checkpoint['opt'].amp:
+                    print('==> resuming amp state_dict')
+                    amp.load_state_dict(checkpoint['amp'])
+            except KeyError as e:
+                print(str(e))
+                pass
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(args.resume, checkpoint['epoch']))
             del checkpoint
