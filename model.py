@@ -14,16 +14,26 @@ class Encoder(nn.Module):
 
     def __init__(self, device, feat_dim=1024):
         super(Encoder, self).__init__()
+        
         self.encoder = SalEncoder(3, feat_dim)
+        self.feat_dim = feat_dim
+
         if device != 'cpu':
             self.encoder = nn.DataParallel(self.encoder)
 
-    def forward(self, x, t1, t2, layer=7):
-        z = torch.cat((x.unsqueeze(1), t1.unsqueeze(1), t2.unsqueeze(1)), dim=1)
-        z = z.contiguous().view(-1, 3, 160, 320)
+    def forward(self, x, t1, t2, layer=6):
+        ht, wt = x.shape[2], x.shape[3]
+        # print(x.shape, ht, wt)
+
+        z = torch.cat((x.unsqueeze(1),
+                       t1.unsqueeze(1),
+                       t2.unsqueeze(1)),
+                       dim=1)
+
+        z = z.contiguous().view(-1, 3, ht, wt)
 
         z = self.encoder(z, layer)
-        z = z.view(x.shape[0], -1, 1024)
+        z = z.view(x.shape[0], -1, self.feat_dim)
         z1, z2, z3 = torch.split(z, 1, 1)
 
         return z1.squeeze(), z2.squeeze(), z3.squeeze()
@@ -115,13 +125,13 @@ class SalEncoder(nn.Module):
             nn.BatchNorm1d(feat_dim),
             nn.ReLU(inplace=True),
         )
-        self.l2norm = Normalize(2)
-        self.fc7 = nn.Sequential(
-            # nn.Linear(4096, 4096),
-            nn.Linear(1024, feat_dim),
-            nn.BatchNorm1d(feat_dim),
-            nn.ReLU(inplace=True),   
-        )
+        
+        # self.fc7 = nn.Sequential(
+        #     # nn.Linear(4096, 4096),
+        #     nn.Linear(1024, feat_dim),
+        #     nn.BatchNorm1d(feat_dim),
+        #     nn.ReLU(inplace=True),   
+        # )
         # self.fc8 = nn.Sequential(
         #     nn.Linear(4096, feat_dim),
         #     nn.BatchNorm1d(feat_dim),
@@ -160,18 +170,20 @@ class SalEncoder(nn.Module):
       if layer==5:
         return x
       x = x.view(x.shape[0], -1)
+      
       x = self.fc6(x)
+      
       x = self.l2norm(x)
       if layer==6:
         return x
 
 
-      x  = self.fc7(x)
+      # x  = self.fc7(x)
       # if layer==7:
       #   return x
 
       # x = self.fc8(x)
-      x = self.l2norm(x)
+      # x = self.l2norm(x)
 
 
       return x     

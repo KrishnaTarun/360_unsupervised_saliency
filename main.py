@@ -38,7 +38,7 @@ def parse_options():
     parser.add_argument('--print_freq', type=int, default=1000, help='print frequency in steps')
     parser.add_argument('--tb_freq', type=int, default=50, help='tb frequency in steps')
     parser.add_argument('--save_freq', type=int, default=1, help='save frequency in epoch')
-    parser.add_argument('--batch_size', type=int, default=2, help='batch_size')
+    parser.add_argument('--batch_size', type=int, default=1, help='batch_size')
     parser.add_argument('--num_workers', type=int, default=0, help='num of workers to use')
     parser.add_argument('--epochs', type=int, default=250, help='number of training epochs')
 
@@ -62,6 +62,7 @@ def parse_options():
     parser.add_argument('--nce_t', type=float, default=0.07, help='temperature parameters')
     parser.add_argument('--nce_m', type=float, default=0.5, help='momentum for updates in memory bank')
     parser.add_argument('--feat_dim', type=int, default=1024, help='dim of feat for inner product')
+    parser.add_argument('--layer', type=int, default=6, help='output layer')
 
     # dataset
     parser.add_argument('--dataset', type=str, default='Train')
@@ -153,6 +154,7 @@ def init_model(args, n_data):
 
     #set model and NCE criterion
     net =  Encoder(device, args.feat_dim)
+
     contrast = NCEAverage(args.feat_dim,\
                             n_data, args.nce_k,\
                             args.nce_t, args.nce_m,\
@@ -195,7 +197,7 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args):
     
     net.train()
     contrast.train()
-    Transf_ = Projection()
+    Transf_ = Projection(160, 320)
 
     steps = args.start_steps
 
@@ -220,7 +222,7 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args):
             
             #-------forward---------------
             
-            feat1, feat2, feat3 = net(batch_data, tf1, tf2)
+            feat1, feat2, feat3 = net(batch_data, tf1, tf2, args.layer)
             
             #--------loss-----------------
             index.cuda()
