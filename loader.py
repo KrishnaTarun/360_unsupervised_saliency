@@ -11,40 +11,40 @@ import glob
 import math
 import matplotlib.pyplot as plt
 #--------------------Projection--------------------------
-def T1(src):
-    lng = np.pi*(2 * (np.repeat(np.array([np.arange(0,src.shape[1])]), repeats =
-    src.shape[0], axis = 0)) / (src.shape[1]) - 1.0)
-    lat = 0.5*np.pi*(2 * (np.repeat(np.array(np.ones((1,src.shape[1]))), repeats =
-    src.shape[0], axis = 0)*np.arange(0,src.shape[0]).reshape(src.shape[0],1)) /
-    (src.shape[0]) - 1.0)
-    Z_axes = np.cos(lat) * np.cos(lng)
-    Y_axes = np.cos(lat) * np.sin(lng)
-    X_axes = -np.sin(lat)
-    D = np.sqrt(X_axes*X_axes + Y_axes*Y_axes)
-    lat_shifted = np.arctan2(Z_axes, D)
-    lng_shifted = np.arctan2(Y_axes, X_axes)
-    x_shifted = (0.5 * (lng_shifted) / np.pi + 0.5) * (src.shape[1]) -0.5
-    y_shifted = ((lat_shifted) / np.pi + 0.5) * (src.shape[0]) -0.5
-    first_transformation = src[y_shifted.astype(np.intp),x_shifted.astype(np.intp)]
-    return first_transformation
-def T2(src):
-    lng = np.pi*(2 * (np.repeat(np.array([np.arange(0,src.shape[1])]), repeats =
-    src.shape[0], axis = 0)) / (src.shape[1]) - 1.0)
-    lat = 0.5*np.pi*(2 * (np.repeat(np.array(np.ones((1,src.shape[1]))), repeats =
-    src.shape[0], axis = 0)*np.arange(0,src.shape[0]).reshape(src.shape[0],1)) /
-    (src.shape[0]) - 1.0)
+# def T1(src):
+#     lng = np.pi*(2 * (np.repeat(np.array([np.arange(0,src.shape[1])]), repeats =
+#     src.shape[0], axis = 0)) / (src.shape[1]) - 1.0)
+#     lat = 0.5*np.pi*(2 * (np.repeat(np.array(np.ones((1,src.shape[1]))), repeats =
+#     src.shape[0], axis = 0)*np.arange(0,src.shape[0]).reshape(src.shape[0],1)) /
+#     (src.shape[0]) - 1.0)
+#     Z_axes = np.cos(lat) * np.cos(lng)
+#     Y_axes = np.cos(lat) * np.sin(lng)
+#     X_axes = -np.sin(lat)
+#     D = np.sqrt(X_axes*X_axes + Y_axes*Y_axes)
+#     lat_shifted = np.arctan2(Z_axes, D)
+#     lng_shifted = np.arctan2(Y_axes, X_axes)
+#     x_shifted = (0.5 * (lng_shifted) / np.pi + 0.5) * (src.shape[1]) -0.5
+#     y_shifted = ((lat_shifted) / np.pi + 0.5) * (src.shape[0]) -0.5
+#     first_transformation = src[y_shifted.astype(np.intp),x_shifted.astype(np.intp)]
+#     return first_transformation
+# def T2(src):
+#     lng = np.pi*(2 * (np.repeat(np.array([np.arange(0,src.shape[1])]), repeats =
+#     src.shape[0], axis = 0)) / (src.shape[1]) - 1.0)
+#     lat = 0.5*np.pi*(2 * (np.repeat(np.array(np.ones((1,src.shape[1]))), repeats =
+#     src.shape[0], axis = 0)*np.arange(0,src.shape[0]).reshape(src.shape[0],1)) /
+#     (src.shape[0]) - 1.0)
 
-    Z_axes = np.cos(lat) * np.cos(lng+np.pi)
-    Y_axes = -np.cos(lat) * np.sin(lng+np.pi)
-    X_axes = np.sin(lat)
-    D = np.sqrt(X_axes*X_axes + Y_axes*Y_axes)
-    lat_shifted = np.arctan2(Z_axes, D)
-    lng_shifted = np.arctan2(Y_axes, X_axes)
-    x_shifted = (0.5 * (lng_shifted) / np.pi + 0.5) * (src.shape[1]) -0.5
-    y_shifted = ((lat_shifted) / np.pi + 0.5) * (src.shape[0]) -0.5
-    second_transformation = src[y_shifted.astype(np.intp), x_shifted.astype(np.intp)]
-    # Image.fromarray(second_transformation)
-    return second_transformation
+#     Z_axes = np.cos(lat) * np.cos(lng+np.pi)
+#     Y_axes = -np.cos(lat) * np.sin(lng+np.pi)
+#     X_axes = np.sin(lat)
+#     D = np.sqrt(X_axes*X_axes + Y_axes*Y_axes)
+#     lat_shifted = np.arctan2(Z_axes, D)
+#     lng_shifted = np.arctan2(Y_axes, X_axes)
+#     x_shifted = (0.5 * (lng_shifted) / np.pi + 0.5) * (src.shape[1]) -0.5
+#     y_shifted = ((lat_shifted) / np.pi + 0.5) * (src.shape[0]) -0.5
+#     second_transformation = src[y_shifted.astype(np.intp), x_shifted.astype(np.intp)]
+#     # Image.fromarray(second_transformation)
+#     return second_transformation
     
 class Projection():
 
