@@ -122,7 +122,7 @@ class SalEncoder(nn.Module):
         self.fc6 = nn.Sequential(
             # nn.Linear(512 * 5 * 10, 4096 ),
             nn.Linear(512 * 5 * 2, feat_dim),
-            nn.BatchNorm1d(feat_dim),
+            # nn.BatchNorm1d(feat_dim),
             nn.ReLU(inplace=True),
         )
         
