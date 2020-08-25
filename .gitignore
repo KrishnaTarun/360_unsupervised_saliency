@@ -3,3 +3,4 @@ models/
 runs/
 __pycache__/
 apex/
+initial.pt
