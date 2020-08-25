@@ -154,6 +154,46 @@ def init_model(args, n_data):
 
     #set model and NCE criterion
     net =  Encoder(device, args.feat_dim)
+    # "-----------------------------------------------"
+    model_keys = [net.encoder.conv_block_1,
+                  net.encoder.conv_block_2,
+                  net.encoder.conv_block_3,
+                  net.encoder.conv_block_4,
+                  net.encoder.conv_block_5_1] 
+    model = torch.load("initial.pt")
+    copy_net_keys = []
+    
+    # store keys
+    for k, v in model.items():
+      # print("Layer {}".format(k))
+      
+      if 'encoder' in k.split('.'):
+        copy_net_keys.append(k)
+    copy_net_keys = [tuple(copy_net_keys[i:i+2]) for i in range(0, len(copy_net_keys), 2)]
+    
+    c = 0
+    for j, layer in enumerate(net.encoder.children()):
+      try:
+        # print(layer, j, model_keys[j][0].bias.shape)
+        
+        for id_, k in enumerate(layer.modules()):
+          # print(id_)
+          if isinstance(k, nn.Conv2d):
+            with torch.no_grad():
+              model_keys[j][id_-1].weight.copy_(model[comodel_keys[c][0]])
+              model_keys[j][id_-1].bias.copy_(model[copy_net_keys[c][1]])
+            print(c)
+            c+=1
+    
+      except IndexError as e:
+        pass
+    # "------------------------------------------------------"    
+
+
+
+
+
+
 
     contrast = NCEAverage(args.feat_dim,\
                             n_data, args.nce_k,\
