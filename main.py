@@ -44,7 +44,7 @@ def parse_options():
 
     # optimization
     parser.add_argument('--optimizer_type', type=str, default='Adam', choices=['SGD', 'Adam'])
-    parser.add_argument('--learning_rate', type=float, default=1.0, help='learning rate')
+    parser.add_argument('--learning_rate', type=float, default=0.3, help='learning rate')
     parser.add_argument('--lr_decay_epochs', type=str, default='120,160,200', help='where to decay lr, can be a list')
     parser.add_argument('--lr_decay_rate', type=float, default=0.1, help='decay rate for learning rate')
     parser.add_argument('--beta1', type=float, default=0.9, help='beta1 for adam')
@@ -155,11 +155,11 @@ def init_model(args, n_data):
     #set model and NCE criterion
     net =  Encoder(device, args.feat_dim)
     # "-----------------------------------------------"
-    model_keys = [net.encoder.conv_block_1,
-                  net.encoder.conv_block_2,
-                  net.encoder.conv_block_3,
-                  net.encoder.conv_block_4,
-                  net.encoder.conv_block_5_1] 
+    model_keys = [net.encoder.module.conv_block_1,
+                  net.encoder.module.conv_block_2,
+                  net.encoder.module.conv_block_3,
+                  net.encoder.module.conv_block_4,
+                  net.encoder.module.conv_block_5_1] 
     model = torch.load("initial.pt")
     copy_net_keys = []
     
@@ -172,7 +172,7 @@ def init_model(args, n_data):
     copy_net_keys = [tuple(copy_net_keys[i:i+2]) for i in range(0, len(copy_net_keys), 2)]
     
     c = 0
-    for j, layer in enumerate(net.encoder.children()):
+    for j, layer in enumerate(net.encoder.module.children()):
       try:
         # print(layer, j, model_keys[j][0].bias.shape)
         
@@ -180,20 +180,15 @@ def init_model(args, n_data):
           # print(id_)
           if isinstance(k, nn.Conv2d):
             with torch.no_grad():
-              model_keys[j][id_-1].weight.copy_(model[comodel_keys[c][0]])
+              model_keys[j][id_-1].weight.copy_(model[copy_net_keys[c][0]])
               model_keys[j][id_-1].bias.copy_(model[copy_net_keys[c][1]])
-            print(c)
+            # print(c)
             c+=1
     
       except IndexError as e:
         pass
     # "------------------------------------------------------"    
-
-
-
-
-
-
+    del model
 
     contrast = NCEAverage(args.feat_dim,\
                             n_data, args.nce_k,\
