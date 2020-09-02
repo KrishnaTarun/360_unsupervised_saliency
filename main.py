@@ -148,7 +148,7 @@ def init_model(args, n_data):
     #set device
     #need to change in case of multiple-GPUS
     #=====================================================================
-    device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
+    device = torch.device("cuda" if torch.cuda.is_available() else 'cpu')
     #-----------remove this--------
     #device = torch.device('cpu')
 
@@ -189,6 +189,7 @@ def init_model(args, n_data):
         pass
     # "------------------------------------------------------"    
     del model
+    
 
     contrast = NCEAverage(args.feat_dim,\
                             n_data, args.nce_k,\
@@ -211,24 +212,43 @@ def init_model(args, n_data):
     return net, contrast, nce_l1, nce_l2, device
 #-------------------------------------------------------------------------
 def init_optimizer(args, net):
-    #set optimizer 
-
-    if args.optimizer_type =='SGD':
-        optimizer = torch.optim.SGD(net.parameters(),
-                                    lr=args.learning_rate,
-                                    momentum=args.momentum,
-                                    weight_decay=args.weight_decay)
     
-    if args.optimizer_type == 'Adam':
-        optimizer = torch.optim.Adam(net.parameters(),
-                                     lr=args.learning_rate, 
-                                     betas=(args.beta1, args.beta2),
-                                     weight_decay=args.weight_decay)    
+    
+    optimizer1 = torch.optim.Adam(net.parameters(),
+                                    lr=args.learning_rate, 
+                                    betas=(args.beta1, args.beta2),
+                                    weight_decay=args.weight_decay) 
 
-    return optimizer
+    for j, layer in enumerate(net.children()):
+        if (j<=4):
+            try:
+                for k in layer.modules():
+                    if isinstance(k, nn.Conv2d):
+                        k.weight.requires_grad = False
+                        k.bias.requires_grad = False
+                   
+            except IndexError as e:
+                pass  
+
+    
+    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, net.parameters()),
+                                    lr=args.learning_rate, 
+                                    betas=(args.beta1, args.beta2),
+                                    weight_decay=args.weight_decay)    
+               
+    # #set optimizer 
+    # if args.optimizer_type =='SGD':
+    #     optimizer = torch.optim.SGD(net.parameters(),
+    #                                 lr=args.learning_rate,
+    #                                 momentum=args.momentum,
+    #                                 weight_decay=args.weight_decay)
+    
+    # if args.optimizer_type == 'Adam':
+
+    return optimizer, optimizer1
 
 #-----------------------------------------------------------------------
-def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args):
+def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, optimizer1, args):
     
     net.train()
     contrast.train()
@@ -240,6 +260,7 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args):
 
         #adjust learning rate
         adjust_learning_rate(epoch, args, optimizer)
+        adjust_learning_rate(epoch, args, optimizer1)
 
         t1 = time.time()
 
@@ -268,15 +289,22 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args):
             loss = nce_1 + nce_2
 
             #-----------backward----------
-            optimizer.zero_grad()
+            if(epoch>20):
 
-            if args.amp:
-                with amp.scale_loss(loss, optimizer) as scaled_loss:
-                    scaled_loss.backward()
+                optimizer1.zero_grad()
             else:
-                loss.backward()
-            
-            optimizer.step()
+                optimizer.zero_grad()
+            loss.backward()
+
+            # if args.amp:
+            #     with amp.scale_loss(loss, optimizer) as scaled_loss:
+            #         scaled_loss.backward()
+            # else:
+            #     loss.backward()
+            if(epoch>20):
+                optimizer1.step()
+            else:
+                optimizer.step()
 
             steps+=1
             #-------------print and tensorboard logs ------------------
@@ -284,6 +312,8 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args):
                 print('Epoch: {}/{} || steps: {}/{} || total loss: {:.3f} || loss_nce1: {:.3f} || loss_nce2: {:.3f}'\
                     .format(epoch, args.epochs, steps, args.total_steps,
                     loss.item(), nce_1.item(), nce_2.item()))
+                # print("max feat1: {}, feat2: {}, feat3: {}".format(feat1.max().item(), feat2.max().item(), feat3.max().item()))    
+                print(feat1.mean().item(), feat2.mean().item(), feat3.mean().item())
                 sys.stdout.flush()
             #logs
             if (steps%args.tb_freq==0):
@@ -295,6 +325,8 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args):
            #------------------------------------------------------------- 
         t2 = time.time()
         print('epoch {}, total time {:.2f}s'.format(epoch, (t2 - t1)))
+        #------train--completley-------------------
+        
 
         #-------------------save model (after every epoch)-------------------------------   
         if(epoch%args.save_freq==0):
@@ -334,11 +366,11 @@ def main():
     net, contrast, nce_l1, nce_l2, args.device = init_model(args,n_data)
 
     #get optimizer
-    optimizer = init_optimizer(args, net)
+    optimizer, optimizer1 = init_optimizer(args, net)
 
     #mixed_precsion
-    if args.amp:
-        model, optimizer = amp.initialize(net, optimizer, opt_level=args.opt_level)
+    # if args.amp:
+    #     model, optimizer = amp.initialize(net, optimizer, opt_level=args.opt_level)
 
     #checkpoint
     args.start_epoch = 1
@@ -371,7 +403,7 @@ def main():
     args.logger = tb_logger.Logger(logdir=args.tb_folder, flush_secs=2)
     
     #start the training loop
-    train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args)
+    train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, optimizer1, args)
     
 if __name__=='__main__':
     main()

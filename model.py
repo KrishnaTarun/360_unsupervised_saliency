@@ -50,10 +50,10 @@ class SalEncoder(nn.Module):
         #TODO: Batch_Normalization
         self.conv_block_1 = nn.Sequential(
             Conv2d(in_channel, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.BatchNorm2d(64),
+            # nn.BatchNorm2d(64),
             ReLU(inplace=True),
             Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.BatchNorm2d(64),
+            # nn.BatchNorm2d(64),
             ReLU(inplace=True),
             MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False),
                     
@@ -62,10 +62,10 @@ class SalEncoder(nn.Module):
         self.conv_block_2 = nn.Sequential(
             
             Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.BatchNorm2d(128),
+            # nn.BatchNorm2d(128),
             ReLU(inplace=True),
             Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.BatchNorm2d(128),
+            # nn.BatchNorm2d(128),
             ReLU(inplace=True),
             MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False),
             
@@ -74,13 +74,13 @@ class SalEncoder(nn.Module):
         self.conv_block_3 = nn.Sequential(
             
             Conv2d(128, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.BatchNorm2d(256),
+            # nn.BatchNorm2d(256),
             ReLU(inplace=True),
             Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.BatchNorm2d(256),
+            # nn.BatchNorm2d(256),
             ReLU(inplace=True),
             Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.BatchNorm2d(256),
+            # nn.BatchNorm2d(256),
             ReLU(inplace=True),
             MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False),
             
@@ -88,26 +88,26 @@ class SalEncoder(nn.Module):
 
         self.conv_block_4 = nn.Sequential(
             Conv2d(256, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.BatchNorm2d(512),
+            # nn.BatchNorm2d(512),
             ReLU(inplace=True),
             Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.BatchNorm2d(512),
+            # nn.BatchNorm2d(512),
             ReLU(inplace=True),
             Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.BatchNorm2d(512),
+            # nn.BatchNorm2d(512),
             ReLU(inplace=True),
             MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False),
             )
 
         self.conv_block_5_1 = nn.Sequential(
             Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.BatchNorm2d(512),
+            # nn.BatchNorm2d(512),
             ReLU(inplace=True),
             Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.BatchNorm2d(512),
+            # nn.BatchNorm2d(512),
             ReLU(inplace=True),
             Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-            nn.BatchNorm2d(512),
+            # nn.BatchNorm2d(512),
             ReLU(inplace=True)
             )
 
@@ -122,7 +122,7 @@ class SalEncoder(nn.Module):
         self.fc6 = nn.Sequential(
             # nn.Linear(512 * 5 * 10, 4096 ),
             nn.Linear(512 * 5 * 2, feat_dim),
-            # nn.BatchNorm1d(feat_dim),
+            nn.BatchNorm1d(feat_dim),
             nn.ReLU(inplace=True),
         )
         
@@ -203,33 +203,47 @@ class Normalize(nn.Module):
 if __name__ =="__main__":
 
     model = SalEncoder(3,) 
-    model_keys = [model.conv_block_1, model.conv_block_2, model.conv_block_3, model.conv_block_4, model.conv_block_5_1] 
-    net = torch.load("initial.pt")
-    copy_net_keys = []
-    
-    # store keys
-    for k, v in net.items():
-      # print("Layer {}".format(k))
-      
-      if 'encoder' in k.split('.'):
-        copy_net_keys.append(k)
-    copy_net_keys = [tuple(copy_net_keys[i:i+2]) for i in range(0, len(copy_net_keys), 2)]
     # summary(model, (3, 160, 320))
-    print(copy_net_keys)
-    c = 0
+    # model_keys = [model.conv_block_1, model.conv_block_2, model.conv_block_3, model.conv_block_4, model.conv_block_5_1] 
+    # net = torch.load("initial.pt")
+    # copy_net_keys = []
+    
+    # # store keys
+    # for k, v in net.items():
+    #   # print("Layer {}".format(k))
+      
+    #   if 'encoder' in k.split('.'):
+    #     copy_net_keys.append(k)
+    # copy_net_keys = [tuple(copy_net_keys[i:i+2]) for i in range(0, len(copy_net_keys), 2)]
+    # print(copy_net_keys)
+    # c = 0
+    # for j, layer in enumerate(model.children()):
+    #   try:
+    #     # print(layer, j, model_keys[j][0].bias.shape)
+        
+    #     for id_, k in enumerate(layer.modules()):
+    #       # print(id_)
+    #       if isinstance(k, nn.Conv2d):
+    #         with torch.no_grad():
+    #           model_keys[j][id_-1].weight.copy_(net[copy_net_keys[c][0]])
+    #           model_keys[j][id_-1].bias.copy_(net[copy_net_keys[c][1]])
+    #         print(c)
+    #         c+=1
+    
+    #   except IndexError as e:
+    #     pass
     for j, layer in enumerate(model.children()):
       try:
-        # print(layer, j, model_keys[j][0].bias.shape)
+        if(j<=4):
         
-        for id_, k in enumerate(layer.modules()):
-          # print(id_)
-          if isinstance(k, nn.Conv2d):
-            with torch.no_grad():
-              model_keys[j][id_-1].weight.copy_(net[copy_net_keys[c][0]])
-              model_keys[j][id_-1].bias.copy_(net[copy_net_keys[c][1]])
-            print(c)
-            c+=1
-    
+          for k in layer.modules():
+            if isinstance(k, nn.Conv2d):
+               k.weight.requires_grad=False
+               k.bias.requires_grad=False
       except IndexError as e:
         pass  
 
+    for params in model.parameters():
+      # print(params)
+      if(params.requires_grad==True):
+        print('yes')

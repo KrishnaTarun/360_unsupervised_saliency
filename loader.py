@@ -48,7 +48,7 @@ import matplotlib.pyplot as plt
     
 class Projection():
 
-    def __init__(self, ht=320, wt=640): 
+    def __init__(self, ht=160, wt=320): 
         super(Projection, self).__init__()
         # ht: height of image
         # wt: width  of image 
@@ -157,7 +157,7 @@ if __name__=="__main__":
 
     train_set = ImageData(
                 pil_loader, 
-                './data/Train/image',
+                './data/Train/indoors',
                 transforms.Compose([
                     transforms.RandomHorizontalFlip(),
                     transforms.ToTensor()
@@ -174,9 +174,10 @@ if __name__=="__main__":
     for i, (x, index) in enumerate(train_loader):
 
         tf1, tf2 = Tf(x)
-        plt.imsave(os.path.join('check1',str(i)+"_t2"+".jpg"), tf2[0].permute(1, 2, 0))
-        plt.imsave(os.path.join('check1',str(i)+"_t1"+".jpg"), tf1[0].permute(1, 2, 0))
-        plt.imsave(os.path.join('check1',str(i)+".jpg"),x[0].permute(1, 2, 0))
+        print(x.shape)
+        plt.imsave(os.path.join('check1',str(i)+"_t2"+".jpg"), tf2[0].permute(1, 2, 0).numpy())
+        plt.imsave(os.path.join('check1',str(i)+"_t1"+".jpg"), tf1[0].permute(1, 2, 0).numpy())
+        plt.imsave(os.path.join('check1',str(i)+".jpg"),x[0].permute(1, 2, 0).numpy())
 
 
         #------------numpy testing-----------------------
