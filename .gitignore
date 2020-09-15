@@ -5,3 +5,6 @@ __pycache__/
 apex/
 initial.pt
 check1/
+evaluate/
+salgan_3dconv_module.pt
+.vscode/

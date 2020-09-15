@@ -17,10 +17,12 @@ from torchvision import utils
 import sys
 from NCE.NCEAverage import NCEAverage
 from NCE.NCECriterion import NCECriterion
-from NCE.NCECriterion import NCESoftmaxLoss
+from NCE.memory_bank import NCESoftmaxLoss, MemOps
 from utils import adjust_learning_rate, pil_loader
-from model import SalEncoder, Encoder, Normalize
-from loader import ImageData, Projection
+from model import Encoder, Normalize
+from loader import ImageData
+from augment import *
+
 import argparse
 # from utils
 
@@ -35,17 +37,17 @@ def parse_options():
 
     parser = argparse.ArgumentParser('argument for training')
 
-    parser.add_argument('--print_freq', type=int, default=1000, help='print frequency in steps')
+    parser.add_argument('--print_freq', type=int, default=10, help='print frequency in steps')
     parser.add_argument('--tb_freq', type=int, default=50, help='tb frequency in steps')
     parser.add_argument('--save_freq', type=int, default=1, help='save frequency in epoch')
-    parser.add_argument('--batch_size', type=int, default=1, help='batch_size')
+    parser.add_argument('--batch_size', type=int, default=32, help='batch_size')
     parser.add_argument('--num_workers', type=int, default=0, help='num of workers to use')
-    parser.add_argument('--epochs', type=int, default=250, help='number of training epochs')
+    parser.add_argument('--epochs', type=int, default=200, help='number of training epochs')
 
     # optimization
-    parser.add_argument('--optimizer_type', type=str, default='Adam', choices=['SGD', 'Adam'])
+    parser.add_argument('--optimizer_type', type=str, default='SGD', choices=['SGD', 'Adam'])
     parser.add_argument('--learning_rate', type=float, default=0.3, help='learning rate')
-    parser.add_argument('--lr_decay_epochs', type=str, default='120,160,200', help='where to decay lr, can be a list')
+    parser.add_argument('--lr_decay_epochs', type=str, default='50,100', help='where to decay lr, can be a list')
     parser.add_argument('--lr_decay_rate', type=float, default=0.1, help='decay rate for learning rate')
     parser.add_argument('--beta1', type=float, default=0.9, help='beta1 for adam')
     parser.add_argument('--beta2', type=float, default=0.999, help='beta2 for Adam')
@@ -86,13 +88,14 @@ def parse_options():
         raise ValueError('one or more of the folders is None: data_folder | model_path | tb_path')
 
     iterations = opt.lr_decay_epochs.split(',')
+
     opt.lr_decay_epochs = list([])
     for it in iterations:
         opt.lr_decay_epochs.append(int(it))
 
     opt.method = 'softmax' if opt.softmax else 'nce'
-    opt.model_name = 'memory_{}_{}_lr_{}_decay_{}_bsz_{}'.format(opt.method, opt.nce_k, opt.learning_rate,
-                                                                    opt.weight_decay, opt.batch_size)
+    opt.model_name = 'memory_{}_{}_lr_{}_decay_{}_bsz_{}_optim_{}'.format(opt.method, opt.nce_k, opt.learning_rate,
+                                                                    opt.weight_decay, opt.batch_size, opt.optimizer_type)
 
     if opt.amp:
         opt.model_name = '{}_amp_{}'.format(opt.model_name, opt.opt_level)
@@ -116,25 +119,15 @@ def get_data_loader(args):
     #path to image folders
     data_folder = os.path.join(args.data_folder, 'Train', 'image')
 
-    means = [0.485, 0.456, 0.406]
-    stds =  [0.229, 0.224, 0.225]
-    
-    normalize = transforms.Normalize(mean=means, std=stds)
-
-    train_transform = transforms.Compose([
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        normalize,
-    ])
     
     train_dataset = ImageData(pil_loader, 
                              data_folder, 
-                             transform=train_transform)
-    train_sampler = None
+                             transform=AugmentImage())
 
     # train loader
+    train_sampler = None
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
+        train_dataset, batch_size=args.batch_size, shuffle=True,
         num_workers=args.num_workers, pin_memory=True, sampler=train_sampler)
 
     # num of samples
@@ -148,57 +141,59 @@ def init_model(args, n_data):
     #set device
     #need to change in case of multiple-GPUS
     #=====================================================================
-    device = torch.device("cuda" if torch.cuda.is_available() else 'cpu')
+    device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
     #-----------remove this--------
     #device = torch.device('cpu')
 
     #set model and NCE criterion
+    weight = torch.load("./salgan_3dconv_module.pt")
+
     net =  Encoder(device, args.feat_dim)
+    net.encoder.module.encoder_salgan.load_state_dict(weight, strict=False)
+    del weight
     # "-----------------------------------------------"
-    model_keys = [net.encoder.module.conv_block_1,
-                  net.encoder.module.conv_block_2,
-                  net.encoder.module.conv_block_3,
-                  net.encoder.module.conv_block_4,
-                  net.encoder.module.conv_block_5_1] 
-    model = torch.load("initial.pt")
-    copy_net_keys = []
+    # model_keys = [net.encoder.module.conv_block_1,
+    #               net.encoder.module.conv_block_2,
+    #               net.encoder.module.conv_block_3,
+    #               net.encoder.module.conv_block_4,
+    #               net.encoder.module.conv_block_5_1] 
+    # copy_net_keys = []
     
-    # store keys
-    for k, v in model.items():
-      # print("Layer {}".format(k))
+    # # store keys
+    # for k, v in model.items():
+    #   # print("Layer {}".format(k))
       
-      if 'encoder' in k.split('.'):
-        copy_net_keys.append(k)
-    copy_net_keys = [tuple(copy_net_keys[i:i+2]) for i in range(0, len(copy_net_keys), 2)]
+    #   if 'encoder' in k.split('.'):
+    #     copy_net_keys.append(k)
+    # copy_net_keys = [tuple(copy_net_keys[i:i+2]) for i in range(0, len(copy_net_keys), 2)]
     
-    c = 0
-    for j, layer in enumerate(net.encoder.module.children()):
-      try:
-        # print(layer, j, model_keys[j][0].bias.shape)
+    # c = 0
+    # for j, layer in enumerate(net.encoder.module.children()):
+    #   try:
+    #     # print(layer, j, model_keys[j][0].bias.shape)
         
-        for id_, k in enumerate(layer.modules()):
-          # print(id_)
-          if isinstance(k, nn.Conv2d):
-            with torch.no_grad():
-              model_keys[j][id_-1].weight.copy_(model[copy_net_keys[c][0]])
-              model_keys[j][id_-1].bias.copy_(model[copy_net_keys[c][1]])
-            # print(c)
-            c+=1
+    #     for id_, k in enumerate(layer.modules()):
+    #       # print(id_)
+    #       if isinstance(k, nn.Conv2d):
+    #         with torch.no_grad():
+    #           model_keys[j][id_-1].weight.copy_(model[copy_net_keys[c][0]])
+    #           model_keys[j][id_-1].bias.copy_(model[copy_net_keys[c][1]])
+    #         # print(c)
+    #         c+=1
     
-      except IndexError as e:
-        pass
+    #   except IndexError as e:
+    #     pass
     # "------------------------------------------------------"    
-    del model
     
 
-    contrast = NCEAverage(args.feat_dim,\
+    contrast = MemOps(  args.feat_dim,\
                             n_data, args.nce_k,\
                             args.nce_t, args.nce_m,\
-                            args.softmax)
+                            )
 
-    nce_l1 = NCESoftmaxLoss() if args.softmax else NCECriterion(n_data)
-    nce_l2 = NCESoftmaxLoss() if args.softmax else NCECriterion(n_data)
-
+    nce_l1 = NCESoftmaxLoss() 
+    nce_l2 = NCESoftmaxLoss() 
+    
     #-------------------------
     net = net.to(device)
     contrast = contrast.to(device)
@@ -214,27 +209,29 @@ def init_model(args, n_data):
 def init_optimizer(args, net):
     
     
-    optimizer1 = torch.optim.Adam(net.parameters(),
-                                    lr=args.learning_rate, 
-                                    betas=(args.beta1, args.beta2),
-                                    weight_decay=args.weight_decay) 
+    # optimizer1 = torch.optim.SGD(net.parameters(),
+    #                                 lr=args.learning_rate, 
+    #                                 # betas=(args.beta1, args.beta2),
+    #                                 weight_decay=args.weight_decay) 
 
-    for j, layer in enumerate(net.children()):
-        if (j<=4):
-            try:
-                for k in layer.modules():
-                    if isinstance(k, nn.Conv2d):
-                        k.weight.requires_grad = False
-                        k.bias.requires_grad = False
-                   
-            except IndexError as e:
-                pass  
+    # for j, layer in enumerate(net.encoder.module.children()):
+    #   # print(j, layer)
+    #   try:
+    #     if (j==0):
+    #       for i, k in enumerate(layer.modules()):
+    #         if (i>0):
+    #         #   print(i, k)
+    #           if isinstance(k, nn.Conv2d):
+    #               k.weight.requires_grad=False
+    #               k.bias.requires_grad=False
+    #   except IndexError as e:
+    #     pass  
 
     
-    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, net.parameters()),
-                                    lr=args.learning_rate, 
-                                    betas=(args.beta1, args.beta2),
-                                    weight_decay=args.weight_decay)    
+    # optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, net.parameters()),
+    #                                 lr=args.learning_rate, 
+    #                                 betas=(args.beta1, args.beta2),
+    #                                 weight_decay=args.weight_decay)    
                
     # #set optimizer 
     # if args.optimizer_type =='SGD':
@@ -242,17 +239,20 @@ def init_optimizer(args, net):
     #                                 lr=args.learning_rate,
     #                                 momentum=args.momentum,
     #                                 weight_decay=args.weight_decay)
-    
+    optimizer = torch.optim.SGD(net.parameters(),
+                                    lr=args.learning_rate, 
+                                    # betas=(args.beta1, args.beta2),
+                                    weight_decay=args.weight_decay) 
     # if args.optimizer_type == 'Adam':
 
-    return optimizer, optimizer1
+    return optimizer
 
 #-----------------------------------------------------------------------
-def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, optimizer1, args):
+def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args):
     
     net.train()
     contrast.train()
-    Transf_ = Projection(160, 320)
+    # Transf_ = Projection(160, 320)
 
     steps = args.start_steps
 
@@ -260,40 +260,58 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, optimizer1, ar
 
         #adjust learning rate
         adjust_learning_rate(epoch, args, optimizer)
-        adjust_learning_rate(epoch, args, optimizer1)
+        # adjust_learning_rate(epoch, args, optimizer1)
 
         t1 = time.time()
-
-        for idx, (batch_data, index) in enumerate(train_loader):
-
-            net.zero_grad()
-            batch_size = batch_data.size()[0]
-
-            batch_data = batch_data.to(args.device)
-            index = index.to(args.device).long()
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225]
+        
+        for idx, (x, xt, index) in enumerate(train_loader):
             
-            #Projection 
-            tf1, tf2 = Transf_(batch_data)
+            print(x.mean(), xt.mean())
+            net.zero_grad()
+            batch_size = x.size()[0]
+            img1 = x[0]
+            img2 = xt[0]
+
+            img1 = img1 * torch.tensor(std).view(3, 1, 1)
+            img1 = img1 + torch.tensor(mean).view(3, 1, 1)
+            img1 = transforms.ToPILImage(mode='RGB')(img1)
+            img1 = img1.convert('RGB')
+            # img1.save(str(i), "JPEG")
+            img1.show()
+
+            img2 = img2 * torch.tensor(std).view(3, 1, 1)
+            img2 = img2 + torch.tensor(mean).view(3, 1, 1)
+            img2 = transforms.ToPILImage(mode='RGB')(img2)
+            img2 = img2.convert('RGB')
+            # img2.save(str(i)+'_t', "JPEG")
+            img2.show()
+
+            # x  = x.to(args.device)
+            # xt = xt.to(args.device)
+
+            index = index.to(args.device).long()
             
             
             #-------forward---------------
             
-            feat1, feat2, feat3 = net(batch_data, tf1, tf2, args.layer)
+            f, ft = net(x, xt)
             
             #--------loss-----------------
-            index.cuda()
-            l1, l2 = contrast(feat1, feat2, feat3, index)
-            nce_1, nce_2 = nce_l1(l1), nce_l2(l2)
+            l1, l2 = contrast(f, ft, index)
+            infonce_1, infonce_2 = nce_l1(l1), nce_l2(l2)
 
             #----------batch_loss---------
-            loss = nce_1 + nce_2
+            loss = (0.5)*infonce_1 + (1-0.5)*infonce_2
 
             #-----------backward----------
-            if(epoch>20):
+            # if(epoch>20):
 
-                optimizer1.zero_grad()
-            else:
-                optimizer.zero_grad()
+            #     optimizer1.zero_grad()
+            # else:
+            
+            optimizer.zero_grad()
             loss.backward()
 
             # if args.amp:
@@ -301,25 +319,25 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, optimizer1, ar
             #         scaled_loss.backward()
             # else:
             #     loss.backward()
-            if(epoch>20):
-                optimizer1.step()
-            else:
-                optimizer.step()
+            # if(epoch>20):
+            #     optimizer1.step()
+            # else:
+            #     optimizer.step()
 
             steps+=1
             #-------------print and tensorboard logs ------------------
             if (steps%args.print_freq==0):
                 print('Epoch: {}/{} || steps: {}/{} || total loss: {:.3f} || loss_nce1: {:.3f} || loss_nce2: {:.3f}'\
                     .format(epoch, args.epochs, steps, args.total_steps,
-                    loss.item(), nce_1.item(), nce_2.item()))
+                    loss.item(), infonce_1.item(), infonce_2.item()))
                 # print("max feat1: {}, feat2: {}, feat3: {}".format(feat1.max().item(), feat2.max().item(), feat3.max().item()))    
-                print(feat1.mean().item(), feat2.mean().item(), feat3.mean().item())
+                print(f.mean().item(), ft.mean().item())
                 sys.stdout.flush()
             #logs
             if (steps%args.tb_freq==0):
                 args.logger.log_value('total_loss', loss.item(), steps)
-                args.logger.log_value('loss_nce1', nce_1.item(), steps)
-                args.logger.log_value('loss_nce2', nce_2.item(), steps)
+                args.logger.log_value('loss_nce1', infonce_1.item(), steps)
+                args.logger.log_value('loss_nce2', infonce_2.item(), steps)
 
             
            #------------------------------------------------------------- 
@@ -366,7 +384,7 @@ def main():
     net, contrast, nce_l1, nce_l2, args.device = init_model(args,n_data)
 
     #get optimizer
-    optimizer, optimizer1 = init_optimizer(args, net)
+    optimizer = init_optimizer(args, net)
 
     #mixed_precsion
     # if args.amp:
@@ -403,7 +421,7 @@ def main():
     args.logger = tb_logger.Logger(logdir=args.tb_folder, flush_secs=2)
     
     #start the training loop
-    train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, optimizer1, args)
+    train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args)
     
 if __name__=='__main__':
     main()
