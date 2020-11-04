@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from .alias_multinomial import AliasMethod
+from alias_multinomial import AliasMethod
 import math
 import random
 import numpy as np
@@ -12,11 +12,11 @@ class NCEAverage(nn.Module):
         self.nLem = outputSize
         self.unigrams = torch.ones(self.nLem)
         self.multinomial = AliasMethod(self.unigrams)
-        self.multinomial.cuda()
+        # self.multinomial.cuda()
         self.K = K
         self.use_softmax = use_softmax
 
-        self.register_buffer('params', torch.tensor([K, T, -1, -1, -1, momentum]))
+        self.register_buffer('params', torch.tensor([K, T, -1, -1, -1, momentum])) 
         stdv = 1. / math.sqrt(inputSize / 3)
 
         #intialize with random samples

@@ -4,8 +4,10 @@ import datetime
 import numpy as np
 import pickle
 import tensorboard_logger as tb_logger
-
+from torch.utils.tensorboard import SummaryWriter
 import torch
+import torchvision
+from torchvision.utils import make_grid
 from torch.utils import data
 from torchvision import transforms, utils
 from torch import nn
@@ -15,13 +17,11 @@ import time
 import torch.backends.cudnn as cudnn
 from torchvision import utils
 import sys
-from NCE.NCEAverage import NCEAverage
-from NCE.NCECriterion import NCECriterion
-from NCE.memory_bank import NCESoftmaxLoss, MemOps
 from utils import adjust_learning_rate, pil_loader
-from model import Encoder, Normalize
 from loader import ImageData
-from augment import *
+from NCE.memory_bank import* 
+from augment import*
+from model import*
 
 import argparse
 # from utils
@@ -35,35 +35,39 @@ except ImportError:
 def parse_options():
     parser = argparse.ArgumentParser('argument for training')
 
-    parser = argparse.ArgumentParser('argument for training')
+    
 
-    parser.add_argument('--print_freq', type=int, default=10, help='print frequency in steps')
+    parser.add_argument('--print_freq', type=int, default=50, help='print frequency in steps')
     parser.add_argument('--tb_freq', type=int, default=50, help='tb frequency in steps')
     parser.add_argument('--save_freq', type=int, default=1, help='save frequency in epoch')
-    parser.add_argument('--batch_size', type=int, default=32, help='batch_size')
+    parser.add_argument('--batch_size', type=int, default=20, help='batch_size')
     parser.add_argument('--num_workers', type=int, default=0, help='num of workers to use')
-    parser.add_argument('--epochs', type=int, default=200, help='number of training epochs')
+    parser.add_argument('--epochs', type=int, default=250, help='number of training epochs')
 
     # optimization
     parser.add_argument('--optimizer_type', type=str, default='SGD', choices=['SGD', 'Adam'])
-    parser.add_argument('--learning_rate', type=float, default=0.3, help='learning rate')
-    parser.add_argument('--lr_decay_epochs', type=str, default='50,100', help='where to decay lr, can be a list')
+    parser.add_argument('--learning_rate', type=float, default=0.01, help='learning rate')
+    parser.add_argument('--lr_decay_epochs', type=str, default='120, 200', help='where to decay lr, can be a list')
     parser.add_argument('--lr_decay_rate', type=float, default=0.1, help='decay rate for learning rate')
     parser.add_argument('--beta1', type=float, default=0.9, help='beta1 for adam')
     parser.add_argument('--beta2', type=float, default=0.999, help='beta2 for Adam')
     parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
+    parser.add_argument('--init', type=str, default='rand', choices= ['salgan', 'rand', 'vgg'], help='Initializing model')
 
     # resume path
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                         help='path to latest checkpoint (default: none)')
+
+    # encoder type
+    parser.add_argument('--encode_type', default='Local', type=str, choices=['Vanilla', 'Local'])
 
     # model definition
     parser.add_argument('--softmax', action='store_true', help='using softmax contrastive loss rather than NCE')
     parser.add_argument('--nce_k', type=int, default=16000, help='# negative samples')
     parser.add_argument('--nce_t', type=float, default=0.07, help='temperature parameters')
     parser.add_argument('--nce_m', type=float, default=0.5, help='momentum for updates in memory bank')
-    parser.add_argument('--feat_dim', type=int, default=1024, help='dim of feat for inner product')
+    parser.add_argument('--feat_dim', type=int, default=512, help='dim of feat for inner product')
     parser.add_argument('--layer', type=int, default=6, help='output layer')
 
     # dataset
@@ -94,7 +98,7 @@ def parse_options():
         opt.lr_decay_epochs.append(int(it))
 
     opt.method = 'softmax' if opt.softmax else 'nce'
-    opt.model_name = 'memory_{}_{}_lr_{}_decay_{}_bsz_{}_optim_{}'.format(opt.method, opt.nce_k, opt.learning_rate,
+    opt.model_name = 'encode_{}_init_{}_memory_{}_{}_lr_{}_decay_{}_bsz_{}_optim_{}'.format(opt.encode_type, opt.init,opt.method, opt.nce_k, opt.learning_rate,
                                                                     opt.weight_decay, opt.batch_size, opt.optimizer_type)
 
     if opt.amp:
@@ -144,55 +148,47 @@ def init_model(args, n_data):
     device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
     #-----------remove this--------
     #device = torch.device('cpu')
+    if args.encode_type =='Local':
+        # localdim = LocalDistractor(in_channel=512, in_fc=512, out_fc=512)
+        net = LocalEncoder(device, args.feat_dim)
+    
+    elif args.encoder=='Vanilla':
+        net =  VanillaEncoder(device, args.feat_dim)
 
     #set model and NCE criterion
-    weight = torch.load("./salgan_3dconv_module.pt")
+    if args.init=='salgan':
+        weight = torch.load("./salgan_3dconv_module.pt")
+        net.encoder.module.salgan.load_state_dict(weight, strict=False)
+        del weight
+    
+    if args.init == 'rand':
+        print('--------------------------')
+        print('Random Initialization')
+        print('---------------------------')
+        def init_weights(m):
 
-    net =  Encoder(device, args.feat_dim)
-    net.encoder.module.encoder_salgan.load_state_dict(weight, strict=False)
-    del weight
-    # "-----------------------------------------------"
-    # model_keys = [net.encoder.module.conv_block_1,
-    #               net.encoder.module.conv_block_2,
-    #               net.encoder.module.conv_block_3,
-    #               net.encoder.module.conv_block_4,
-    #               net.encoder.module.conv_block_5_1] 
-    # copy_net_keys = []
+            if type(m) == nn.Conv2d or type(m)== nn.Linear:
+                # print('yes')
+                torch.nn.init.xavier_uniform_(m.weight)
+                m.bias.data.fill_(0.01)
+        net.encoder.module.apply(init_weights)
     
-    # # store keys
-    # for k, v in model.items():
-    #   # print("Layer {}".format(k))
-      
-    #   if 'encoder' in k.split('.'):
-    #     copy_net_keys.append(k)
-    # copy_net_keys = [tuple(copy_net_keys[i:i+2]) for i in range(0, len(copy_net_keys), 2)]
-    
-    # c = 0
-    # for j, layer in enumerate(net.encoder.module.children()):
-    #   try:
-    #     # print(layer, j, model_keys[j][0].bias.shape)
-        
-    #     for id_, k in enumerate(layer.modules()):
-    #       # print(id_)
-    #       if isinstance(k, nn.Conv2d):
-    #         with torch.no_grad():
-    #           model_keys[j][id_-1].weight.copy_(model[copy_net_keys[c][0]])
-    #           model_keys[j][id_-1].bias.copy_(model[copy_net_keys[c][1]])
-    #         # print(c)
-    #         c+=1
-    
-    #   except IndexError as e:
-    #     pass
-    # "------------------------------------------------------"    
-    
+    elif args.init == 'vgg':
+        pass
 
-    contrast = MemOps(  args.feat_dim,\
+    # contrast = MemOps(args.feat_dim,\
+    #                         n_data, args.nce_k,\
+    #                         args.nce_t, args.nce_m,\
+    #                         )
+    contrast =  MemOpsLocDim(args.feat_dim,\
                             n_data, args.nce_k,\
                             args.nce_t, args.nce_m,\
                             )
 
-    nce_l1 = NCESoftmaxLoss() 
-    nce_l2 = NCESoftmaxLoss() 
+    nce_l1 = NCESoftmaxLoss() if args.softmax else NCECriterion(n_data)
+    nce_l2 = NCESoftmaxLoss() if args.softmax else NCECriterion(n_data)
+    
+    # nce_l1 =  NCECriterion  
     
     #-------------------------
     net = net.to(device)
@@ -209,50 +205,20 @@ def init_model(args, n_data):
 def init_optimizer(args, net):
     
     
-    # optimizer1 = torch.optim.SGD(net.parameters(),
-    #                                 lr=args.learning_rate, 
-    #                                 # betas=(args.beta1, args.beta2),
-    #                                 weight_decay=args.weight_decay) 
-
-    # for j, layer in enumerate(net.encoder.module.children()):
-    #   # print(j, layer)
-    #   try:
-    #     if (j==0):
-    #       for i, k in enumerate(layer.modules()):
-    #         if (i>0):
-    #         #   print(i, k)
-    #           if isinstance(k, nn.Conv2d):
-    #               k.weight.requires_grad=False
-    #               k.bias.requires_grad=False
-    #   except IndexError as e:
-    #     pass  
-
-    
-    # optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, net.parameters()),
-    #                                 lr=args.learning_rate, 
-    #                                 betas=(args.beta1, args.beta2),
-    #                                 weight_decay=args.weight_decay)    
-               
-    # #set optimizer 
-    # if args.optimizer_type =='SGD':
-    #     optimizer = torch.optim.SGD(net.parameters(),
-    #                                 lr=args.learning_rate,
-    #                                 momentum=args.momentum,
-    #                                 weight_decay=args.weight_decay)
+                  
     optimizer = torch.optim.SGD(net.parameters(),
                                     lr=args.learning_rate, 
-                                    # betas=(args.beta1, args.beta2),
                                     weight_decay=args.weight_decay) 
-    # if args.optimizer_type == 'Adam':
+    
 
     return optimizer
 
 #-----------------------------------------------------------------------
 def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args):
     
+    
     net.train()
     contrast.train()
-    # Transf_ = Projection(160, 320)
 
     steps = args.start_steps
 
@@ -263,66 +229,43 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args):
         # adjust_learning_rate(epoch, args, optimizer1)
 
         t1 = time.time()
-        mean=[0.485, 0.456, 0.406],
-        std=[0.229, 0.224, 0.225]
+        
         
         for idx, (x, xt, index) in enumerate(train_loader):
             
-            print(x.mean(), xt.mean())
+            
             net.zero_grad()
-            batch_size = x.size()[0]
-            img1 = x[0]
-            img2 = xt[0]
-
-            img1 = img1 * torch.tensor(std).view(3, 1, 1)
-            img1 = img1 + torch.tensor(mean).view(3, 1, 1)
-            img1 = transforms.ToPILImage(mode='RGB')(img1)
-            img1 = img1.convert('RGB')
-            # img1.save(str(i), "JPEG")
-            img1.show()
-
-            img2 = img2 * torch.tensor(std).view(3, 1, 1)
-            img2 = img2 + torch.tensor(mean).view(3, 1, 1)
-            img2 = transforms.ToPILImage(mode='RGB')(img2)
-            img2 = img2.convert('RGB')
-            # img2.save(str(i)+'_t', "JPEG")
-            img2.show()
-
-            # x  = x.to(args.device)
-            # xt = xt.to(args.device)
-
+            
+            
+            # torchvision.utils.save_image(torchvision.utils.make_grid(z, nrow=10), 
+            #                              fp='f.jpg')    
+            
+            x, xt  = x.to(args.device), xt.to(args.device) 
+            
             index = index.to(args.device).long()
             
-            
+
             #-------forward---------------
             
-            f, ft = net(x, xt)
+            f, ft  = net(x, xt)
             
+            #  print(f[0].m()) 
             #--------loss-----------------
+            
             l1, l2 = contrast(f, ft, index)
             infonce_1, infonce_2 = nce_l1(l1), nce_l2(l2)
 
             #----------batch_loss---------
-            loss = (0.5)*infonce_1 + (1-0.5)*infonce_2
+            #lambda*l1 + (1-lambda)*l2
+            loss = (0.3)*infonce_1 + (0.7)*infonce_2
+            # loss = infonce_2
 
             #-----------backward----------
-            # if(epoch>20):
-
-            #     optimizer1.zero_grad()
-            # else:
             
             optimizer.zero_grad()
             loss.backward()
 
-            # if args.amp:
-            #     with amp.scale_loss(loss, optimizer) as scaled_loss:
-            #         scaled_loss.backward()
-            # else:
-            #     loss.backward()
-            # if(epoch>20):
-            #     optimizer1.step()
-            # else:
-            #     optimizer.step()
+            optimizer.step()
 
             steps+=1
             #-------------print and tensorboard logs ------------------
@@ -330,14 +273,27 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args):
                 print('Epoch: {}/{} || steps: {}/{} || total loss: {:.3f} || loss_nce1: {:.3f} || loss_nce2: {:.3f}'\
                     .format(epoch, args.epochs, steps, args.total_steps,
                     loss.item(), infonce_1.item(), infonce_2.item()))
+
                 # print("max feat1: {}, feat2: {}, feat3: {}".format(feat1.max().item(), feat2.max().item(), feat3.max().item()))    
-                print(f.mean().item(), ft.mean().item())
+                # print(f.mean().item(), ft.mean().item())
                 sys.stdout.flush()
             #logs
             if (steps%args.tb_freq==0):
                 args.logger.log_value('total_loss', loss.item(), steps)
                 args.logger.log_value('loss_nce1', infonce_1.item(), steps)
                 args.logger.log_value('loss_nce2', infonce_2.item(), steps)
+                
+                #TODO
+                
+                # count=0
+                # for i, m in enumerate(net.modules()):
+                #     if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
+                #         # print(i, m.weight.data.size(),m.weight.grad.size())
+                #         # writer.add_scalar('Gradient/layer_'+str(count), m.weight.grad.abs().mean(), steps)
+                #         print(m.weight.grad)
+                #         writer.add_histogram('hist_layer_'+str(count), m.weight.grad, steps) 
+                #         count+=1
+                    
 
             
            #------------------------------------------------------------- 
@@ -346,7 +302,7 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args):
         #------train--completley-------------------
         
 
-        #-------------------save model (after every epoch)-------------------------------   
+        #-------------------save net (after every epoch)-------------------------------   
         if(epoch%args.save_freq==0):
             print('==> Saving...')
             state = {
@@ -419,9 +375,44 @@ def main():
     #tensorboard
 
     args.logger = tb_logger.Logger(logdir=args.tb_folder, flush_secs=2)
+    # args.logger = SummaryWriter(log_dir=args.tb_folder)
     
     #start the training loop
     train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args)
     
 if __name__=='__main__':
     main()
+
+# "-----------------------------------------------"
+    # model_keys = [net.encoder.module.conv_block_1,
+    #               net.encoder.module.conv_block_2,
+    #               net.encoder.module.conv_block_3,
+    #               net.encoder.module.conv_block_4,
+    #               net.encoder.module.conv_block_5_1] 
+    # copy_net_keys = []
+    
+    # # store keys
+    # for k, v in model.items():
+    #   # print("Layer {}".format(k))
+      
+    #   if 'encoder' in k.split('.'):
+    #     copy_net_keys.append(k)
+    # copy_net_keys = [tuple(copy_net_keys[i:i+2]) for i in range(0, len(copy_net_keys), 2)]
+    
+    # c = 0
+    # for j, layer in enumerate(net.encoder.module.children()):
+    #   try:
+    #     # print(layer, j, model_keys[j][0].bias.shape)
+        
+    #     for id_, k in enumerate(layer.modules()):
+    #       # print(id_)
+    #       if isinstance(k, nn.Conv2d):
+    #         with torch.no_grad():
+    #           model_keys[j][id_-1].weight.copy_(model[copy_net_keys[c][0]])
+    #           model_keys[j][id_-1].bias.copy_(model[copy_net_keys[c][1]])
+    #         # print(c)
+    #         c+=1
+    
+    #   except IndexError as e:
+    #     pass
+    # "------------------------------------------------------"

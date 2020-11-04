@@ -127,7 +127,7 @@ class AugmentImage():
         self.project = Projection() 
         self.resize = transforms.Resize((160, 320), interpolation=2)
         # self.crop = transforms.CenterCrop((160, 320))
-        self.crop = transforms.RandomResizedCrop((160, 320), scale=(1.0, 0.75),
+        self.crop = transforms.RandomResizedCrop((160, 320), scale=(0.75, 0.75),
                                      ratio=(0.7, 1.4), interpolation=INTERP)
         
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -157,41 +157,50 @@ class AugmentImage():
         ])
 
     def __call__(self, inp):
-        inp = self.flip_lr(inp)
-        out1 = self.test_transform(self.resize(inp))
-         
+        inp = self.resize(self.flip_lr(inp))
+        out1 = self.test_transform(inp)
+
         #---Uniformly project----
         label = np.random.randint(2, size=1)
         out2 = self.project(inp, label)
         #------------------------
         
         out2 = self.train_transform(self.crop(out2))
+        # out2 = self.test_transform(self.crop(out2))
+        # out2 = self.test_transform(out2)
         
         return out1, out2
 
 if __name__=='__main__':
+
     import os
     mean=[0.485, 0.456, 0.406]
     std= [0.229, 0.224, 0.225]
     augment = AugmentImage()
-    
-    with open('check1/1.jpg', 'rb') as f:
-        img = Image.open(f)
-        img  = img.convert('RGB')
+    pth = 'check_augment'
+    if not os.path.isdir(pth):
+        os.makedirs(pth)
 
-        img1, img2 = augment(img)
-        # ---------------------------------------------------
-        img1 = img1 * torch.tensor(std).view(3, 1, 1)
-        img1 = img1 + torch.tensor(mean).view(3, 1, 1)
-        img1 = transforms.ToPILImage(mode='RGB')(img1)
-        img1 = img1.convert('RGB')
-        img1.show()
-        #-----------------------------------------------------
-        img2 = img2 * torch.tensor(std).view(3, 1, 1)
-        img2 = img2 + torch.tensor(mean).view(3, 1, 1)
-        img2 = transforms.ToPILImage(mode='RGB')(img2)
-        img2 = img2.convert('RGB')
-        img2.show()
+    for fi in os.listdir('check1'):
+        with open('check1/'+fi, 'rb') as f:
+            img = Image.open(f)
+            img  = img.convert('RGB')
+
+            img1, img2 = augment(img)
+            # ---------------------------------------------------
+            img1 = img1 * torch.tensor(std).view(3, 1, 1)
+            img1 = img1 + torch.tensor(mean).view(3, 1, 1)
+            img1 = transforms.ToPILImage(mode='RGB')(img1)
+            img1 = img1.convert('RGB')
+            # img1.show()
+            img1.save(os.path.join(pth, fi))
+            #-----------------------------------------------------
+            img2 = img2 * torch.tensor(std).view(3, 1, 1)
+            img2 = img2 + torch.tensor(mean).view(3, 1, 1)
+            img2 = transforms.ToPILImage(mode='RGB')(img2)
+            img2 = img2.convert('RGB')
+            # img2.show()
+            img2.save(os.path.join(pth, fi.split('.')[0]+'_t.jpg'))
         
         #-------------------------------------------------------
 

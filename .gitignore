@@ -8,3 +8,7 @@ check1/
 evaluate/
 salgan_3dconv_module.pt
 .vscode/
+check_augment/
+evaluate.zip
+run_main.sh
+weight_viz.py
