@@ -21,8 +21,9 @@ from utils import adjust_learning_rate, pil_loader
 from loader import ImageData
 from NCE.memory_bank import* 
 from augment import*
-from model import*
-
+# from model import*
+from model_res import*
+from cosine_annealing import CosineAnnealingWarmUpRestarts
 import argparse
 # from utils
 
@@ -40,7 +41,7 @@ def parse_options():
     parser.add_argument('--print_freq', type=int, default=50, help='print frequency in steps')
     parser.add_argument('--tb_freq', type=int, default=50, help='tb frequency in steps')
     parser.add_argument('--save_freq', type=int, default=1, help='save frequency in epoch')
-    parser.add_argument('--batch_size', type=int, default=20, help='batch_size')
+    parser.add_argument('--batch_size', type=int, default=25, help='batch_size')
     parser.add_argument('--num_workers', type=int, default=0, help='num of workers to use')
     parser.add_argument('--epochs', type=int, default=250, help='number of training epochs')
 
@@ -150,31 +151,9 @@ def init_model(args, n_data):
     #device = torch.device('cpu')
     if args.encode_type =='Local':
         # localdim = LocalDistractor(in_channel=512, in_fc=512, out_fc=512)
-        net = LocalEncoder(device, args.feat_dim)
-    
-    elif args.encoder=='Vanilla':
-        net =  VanillaEncoder(device, args.feat_dim)
-
-    #set model and NCE criterion
-    if args.init=='salgan':
-        weight = torch.load("./salgan_3dconv_module.pt")
-        net.encoder.module.salgan.load_state_dict(weight, strict=False)
-        del weight
-    
-    if args.init == 'rand':
-        print('--------------------------')
-        print('Random Initialization')
-        print('---------------------------')
-        def init_weights(m):
-
-            if type(m) == nn.Conv2d or type(m)== nn.Linear:
-                # print('yes')
-                torch.nn.init.xavier_uniform_(m.weight)
-                m.bias.data.fill_(0.01)
-        net.encoder.module.apply(init_weights)
-    
-    elif args.init == 'vgg':
-        pass
+        # net = LocalEncoder(device, args.feat_dim)
+        net = SelfAttLocDim(device, args.feat_dim)
+ 
 
     # contrast = MemOps(args.feat_dim,\
     #                         n_data, args.nce_k,\
@@ -192,9 +171,12 @@ def init_model(args, n_data):
     
     #-------------------------
     net = net.to(device)
-    contrast = contrast.to(device)
-    nce_l1 = nce_l1.to(device)
-    nce_l2 = nce_l2.to(device)
+    # contrast = contrast.to(device)
+    # nce_l1 = nce_l1.to(device)
+    # nce_l2 = nce_l2.to(device)
+    
+    nce_l1 = nce_l1
+    nce_l2 = nce_l2
     
     if device !='cpu':
         cudnn.benchmark = True
@@ -208,13 +190,18 @@ def init_optimizer(args, net):
                   
     optimizer = torch.optim.SGD(net.parameters(),
                                     lr=args.learning_rate, 
-                                    weight_decay=args.weight_decay) 
-    
+                                    weight_decay=args.weight_decay)
+    # optimizer = torch.optim.Adam(net.parameters(), lr=args.learning_rate,
+    #                               betas=(args.beta1, args.beta2),
+    #                               weight_decay=args.weight_decay)
 
-    return optimizer
+    # scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0=50, T_mult=2, eta_max=args.learning_rate, T_up=10, gamma=0.5)
+    scheduler = 0
+
+    return optimizer, scheduler
 
 #-----------------------------------------------------------------------
-def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args):
+def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, scheduler, args):
     
     
     net.train()
@@ -226,6 +213,7 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args):
 
         #adjust learning rate
         adjust_learning_rate(epoch, args, optimizer)
+        # scheduler.step(epoch)
         # adjust_learning_rate(epoch, args, optimizer1)
 
         t1 = time.time()
@@ -233,17 +221,19 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args):
         
         for idx, (x, xt, index) in enumerate(train_loader):
             
-            
+            # print(idx)
             net.zero_grad()
             
             
             # torchvision.utils.save_image(torchvision.utils.make_grid(z, nrow=10), 
             #                              fp='f.jpg')    
             
-            x, xt  = x.to(args.device), xt.to(args.device) 
+            x, xt  = x.cuda(), xt.cuda()  
             
-            index = index.to(args.device).long()
+            index = index.cuda().long()
             
+            # input_ = torch.cat((x.unsqueeze(0), xt.unsqueeze(0)), dim=0)
+            # print(input_.size(), input_.is_cuda)
 
             #-------forward---------------
             
@@ -340,7 +330,7 @@ def main():
     net, contrast, nce_l1, nce_l2, args.device = init_model(args,n_data)
 
     #get optimizer
-    optimizer = init_optimizer(args, net)
+    optimizer, scheduler = init_optimizer(args, net)
 
     #mixed_precsion
     # if args.amp:
@@ -378,7 +368,7 @@ def main():
     # args.logger = SummaryWriter(log_dir=args.tb_folder)
     
     #start the training loop
-    train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, args)
+    train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, scheduler, args)
     
 if __name__=='__main__':
     main()

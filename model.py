@@ -7,10 +7,39 @@ from torch.nn.modules.conv import Conv2d
 from torch.nn.modules.activation import Sigmoid, ReLU
 from torch.nn import Conv3d, MaxPool3d, BatchNorm3d, ConvTranspose3d
 import sys
+import torchvision
 from torch.nn.functional import interpolate
 from torchsummary import summary
 import torch.nn.functional as F
 
+
+
+class ResNetEncoder(nn.Module):
+  def __init__(self,):
+    super(ResNetEncoder, self).__init__()
+
+    model = torchvision.models.resnet50(pretrained=False, progress=False)
+    
+class SelfAttLocDim(nn.Module):
+  def __init__(self, device, feat_dim=512):
+        super(SelfAttLocDim, self).__init__()
+        
+        self.encoder = SalGan(3, feat_dim)
+        self.feat_dim = feat_dim
+        self.localdim = LocalDistractor(in_channel=512, in_fc=512, out_fc=512)
+        self.attention = SelfAttention(in_channel=512, K=8)        
+        if device != 'cpu':
+          self.encoder = nn.DataParallel(self.encoder)
+          # self.localdim = nn.DataParallel(self.localdim)
+
+  def forward(self, x, z,layer=32):
+    
+    x, zx = self.encoder(x, layer=4, flag=True) #normalized(x) 
+    z = self.encoder(z, layer=1) #maps
+    z = self.attention(zx, z)
+    z_dim = self.localdim(z)
+
+    return x, z_dim 
 
 class LocalEncoder(nn.Module):
   
@@ -43,21 +72,24 @@ class LocalDistractor(nn.Module):
     # self.fc_net = nn.Linear(in_features=in_fc, out_features=out_fc)
     self.f0_conv = nn.Conv2d(in_channels=in_channel, out_channels=in_channel, kernel_size=(1, 1))
     self.f1_conv = nn.Conv2d(in_channels=in_channel, out_channels=in_channel, kernel_size=(1, 1))
+    self.b_norm = nn.BatchNorm2d(num_features=in_channel) 
     
+
     
-  def forward(self,z):
+  def forward(self, z):
     
     b, C, h, w = z.size()
     
     out = F.relu(self.f0_conv(z))
-    out = F.relu(self.f1_conv(out))
-    out = F.normalize(out.view(b, C, h*w).sum(-1),p=2, dim=1)
+    out = F.relu(self.b_norm(self.f1_conv(out)))
+    out = F.normalize(out, p=2, dim=1)
+    # out = F.normalize(torch.div(out.view(b, C, h*w).sum(-1),h*w),p=2, dim=1)
+
+    # x = F.relu(self.fc_net(x))
+
 
     return out
-    
-    
-
-
+        
 class VanillaEncoder(nn.Module):
 
     def __init__(self, device, feat_dim=1024):
@@ -82,7 +114,7 @@ class SalGan(nn.Module):
     original_vgg16 = vgg16()
     
     # select only convolutional layers
-    encoder = torch.nn.Sequential(*list(original_vgg16.features)[:30])
+      
     
     # assamble the full architecture encoder-decoder
     self.salgan = torch.nn.Sequential(*(list(encoder.children())))
@@ -102,14 +134,24 @@ class SalGan(nn.Module):
       nn.ReLU(inplace=True),
       )
 
+    self.fc7 = nn.Sequential(
+      # 
+      nn.Linear(feat_dim, feat_dim),
+      #nn.BatchNorm1d(feat_dim),
+      nn.ReLU(inplace=True),
+      )  
+
     self.l2norm = Normalize(2)
 
-  def forward(self, x, layer=1):
+  def forward(self, x, layer=1, flag=False):
 
     out = self.salgan(x)
+    if flag:
+      out_ = out
     if layer==1:
       return out
     out = self.conv_block_5_2(out)
+    
     
     if layer==2:
       return out
@@ -117,25 +159,48 @@ class SalGan(nn.Module):
     out = self.fc6(out)
     
     if layer==3:
-      return out
-    out = F.normalize(out, p=2, dim=1)
-    return  out        
-
-
-
+      return F.normalize(out, p=2, dim=1)
     
+    out = self.fc7(out)
+    out = F.normalize(out, p=2, dim=1)
+    return  out, out_        
+    
+class SelfAttention(nn.Module):
+
+  def __init__(self, in_channel = 512, K=8):
+    
+    super(SelfAttention, self).__init__()
+
+    self.in_channel = in_channel
+    self.K = 8
+    self.qry_ =  nn.Conv2d(in_channels=in_channel, out_channels= int(in_channel/K), kernel_size = (1,1))
+    self.key_ =  nn.Conv2d(in_channels=in_channel, out_channels=int(in_channel/K), kernel_size = (1,1))
+    self.val_ =  nn.Conv2d(in_channels=in_channel, out_channels= int(in_channel/2), kernel_size = (1,1))
+    self.out  =  nn.Conv2d(in_channels=int(in_channel/2), out_channels=in_channel, kernel_size = (1,1))
+    self.gamma = nn.Parameter(torch.zeros(1))
+
+    self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+
+  def forward(self, zx, z):
 
 
+    b, c, h, w = zx.size()
+    qr  = self.qry_(zx).view(b, int(self.in_channel/self.K), -1)
+    key = self.maxpool(self.key_(z))
+    key = key.view(b, int(self.in_channel/self.K), -1)
+    
+    attn = torch.bmm(qr.permute(0,2,1), key)
+    attn = F.softmax(attn, dim=-1)
 
-# class SelfAttention(nn.Module):
-#   def __init__(self, in_channel = 512, K=8):
-#     super(SelfAttention, self).__init__()
+    val = self.maxpool(self.val_(z)).view(b, int(self.in_channel/2), -1)
 
-#     qry_ =  nn.Conv2d(in_channels=in_channel, out_channels=in_channel/K, kernel_size = (1,1))
-#     key_ =  nn.Conv2d(in_channels=in_channel, out_channels=in_channel/K, kernel_size = (1,1))
-#     val_ =  nn.Conv2d(in_channels=in_channel, out_channels=in_channel/K, kernel_size = (1,1))
+    att_val = torch.bmm(attn, val.permute(0,2,1)).permute(0, 2,1)
+    att_val = torch.reshape(att_val, (b, int(self.in_channel/2), h, w))
+    out = self.out(att_val)#input to dim block
+    
+    out = self.gamma * out + z
 
-
+    return out 
 
 
 class Normalize(nn.Module):
@@ -151,9 +216,9 @@ class Normalize(nn.Module):
 if __name__ =="__main__":
 
 
-  x = torch.rand(3, 7, 1024)
-  y = torch.rand(3, 512, 4, 9)
-  model = LocalDim()
+  x = torch.rand(3, 512, 10, 20)
+  y = torch.rand(3, 512, 10, 20)
+  model = SelfAttention()
   g = model(x,y)
   print(g.size())
 

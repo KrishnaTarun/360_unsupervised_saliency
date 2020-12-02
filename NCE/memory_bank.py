@@ -81,6 +81,23 @@ class BaseMem(nn.Module):
         out = out.squeeze().contiguous()
         return out
 
+    def _compute_dotencode_logit(self, z, w):
+        
+        """
+        Args:
+          z: feat, shape [bsz, c, h*w] c=n_dim
+          w: softmax weight, shape [bsz, self.K + 1, n_dim]
+        """
+        out = torch.bmm(w, z)
+        out = out.mean(dim=-1)
+        out = torch.div(out, self.T)
+
+        return out
+
+        
+        
+        
+        
 
 class MemOps(BaseMem):
 
@@ -111,6 +128,7 @@ class MemOps(BaseMem):
             L = (1-lambda)*L_nce(m, x) + (lambda)*L_nce(m, z)
         """
         bsz = x.shape[0]
+        
         n_data = self.params[0].item()
         n_dim  = self.params[1].item()
         z0 = self.params[2].item()
@@ -135,6 +153,7 @@ class MemOps(BaseMem):
         #compute logit for x and z
         lx = self._compute_logit(x, mI)
         lz = self._compute_logit(z, mI)
+        
 
         if not self.use_softmax:
             lx = torch.exp(lx)
@@ -177,6 +196,7 @@ class MemOpsLocDim(BaseMem):
         self.register_buffer('params', torch.tensor([n_data, n_dim, -1]))
 
         self.memory = F.normalize(self.memory, p=2, dim=1)
+        self.memory = self.memory.cuda()
         self.use_softmax = use_softmax
 
     def forward(self, x, z, y):
@@ -187,7 +207,8 @@ class MemOpsLocDim(BaseMem):
 
             L = (1-lambda)*L_nce(m, x) + (lambda)*L_nce(m, z)
         """
-        bsz = x.shape[0]
+        
+        bsz, C, H, W = z.size()
         n_data = self.params[0].item()
         n_dim  = self.params[1].item()
         z0 = self.params[2].item()
@@ -220,7 +241,8 @@ class MemOpsLocDim(BaseMem):
         # zz = F.normalize(z,  dim=-1)
         
         lx = self._compute_logit(x, mI)
-        lz = self._compute_logit(z, mI)
+        # lz = self._compute_logit(z, mI)
+        lz = self._compute_dotencode_logit(z.view(bsz, C, -1), mI)
         # lz = torch.div(lz, self.T)
 
         if not self.use_softmax:
