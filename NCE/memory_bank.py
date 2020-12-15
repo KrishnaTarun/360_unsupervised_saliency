@@ -92,13 +92,8 @@ class BaseMem(nn.Module):
         out = out.mean(dim=-1)
         out = torch.div(out, self.T)
 
-        return out
-
-        
-        
-        
-        
-
+        return out        
+                        
 class MemOps(BaseMem):
 
     def __init__(self, n_dim, n_data, K=65536, T=0.07, m=0.5, use_softmax=False):

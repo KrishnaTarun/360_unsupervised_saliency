@@ -27,6 +27,7 @@ class ResNetEncoder(nn.Module):
     del Enc
     self.fc1 = nn.Linear(in_features=2048, out_features=512)
     self.relu =nn.ReLU()
+    self.bnorm = nn.BatchNorm1d(512)
 
   def forward(self, in_, flag='map'):
       
@@ -34,7 +35,7 @@ class ResNetEncoder(nn.Module):
       #No Normalization in this module
       if flag =='fc_map':
         Zx = self.encoder1(in_)
-        fx  = F.relu(self.fc1(self.encoder2(Zx).view(in_.size()[0],-1).contiguous()))
+        fx  = F.relu(self.bnorm(self.fc1(self.encoder2(Zx).view(in_.size()[0],-1).contiguous())))
         return fx, Zx
 
       if flag=='map':
@@ -43,6 +44,7 @@ class ResNetEncoder(nn.Module):
       
 class SelfAttLocDim(nn.Module):
   def __init__(self, device, feat_dim=512):
+
         super(SelfAttLocDim, self).__init__()
         
         self.encoder = ResNetEncoder()
@@ -58,10 +60,10 @@ class SelfAttLocDim(nn.Module):
     x, zx = self.encoder(x, flag = 'fc_map') 
     z = self.encoder(z, flag = 'map')
 
-    z = self.attention(zx, z)
+    z, gamma = self.attention(zx, z)
     x_dim, z_dim = self.localdim(x, z)
 
-    return x_dim, z_dim 
+    return x_dim, z_dim, gamma 
 
 #TODO (uncomment) without self attention--> look into it inorder to run without self attention
 # class LocalEncoder(nn.Module):
@@ -129,7 +131,7 @@ class SelfAttention(nn.Module):
     self.key_ =  nn.Conv2d(in_channels=in_channel, out_channels=int(in_channel/K), kernel_size = (1,1))
     self.val_ =  nn.Conv2d(in_channels=in_channel, out_channels= int(in_channel/2), kernel_size = (1,1))
     self.out  =  nn.Conv2d(in_channels=int(in_channel/2), out_channels=in_channel, kernel_size = (1,1))
-    self.gamma = nn.Parameter(torch.zeros(1))
+    self.gamma = nn.Parameter(torch.zeros(1)*1.0)
 
     self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
 
@@ -151,9 +153,9 @@ class SelfAttention(nn.Module):
     out = self.out(att_val)#input to dim block
     
     #uncomment for the moment
-    #out = self.gamma * out + z 
+    out = self.gamma * out + z 
 
-    return out 
+    return out, self.gamma
 
 
 class Normalize(nn.Module):

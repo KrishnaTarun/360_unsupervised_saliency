@@ -237,7 +237,7 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, scheduler, arg
 
             #-------forward---------------
             
-            f, ft  = net(x, xt)
+            f, ft, gamma  = net(x, xt)
             
             #  print(f[0].m()) 
             #--------loss-----------------
@@ -272,6 +272,7 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, scheduler, arg
                 args.logger.log_value('total_loss', loss.item(), steps)
                 args.logger.log_value('loss_nce1', infonce_1.item(), steps)
                 args.logger.log_value('loss_nce2', infonce_2.item(), steps)
+                args.logger.log_value('Gamma', gamma.item(), steps)
                 
                 #TODO
                 
