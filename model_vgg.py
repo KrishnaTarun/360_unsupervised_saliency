@@ -13,18 +13,21 @@ from torchsummary import summary
 import torch.nn.functional as F
 
 
+#VGG
 
-class ResNetEncoder(nn.Module):
-  def __init__(self,):
-    super(ResNetEncoder, self).__init__()
-
-    model = torchvision.models.resnet50(pretrained=False, progress=False)
-    
+#for training with everything
 class SelfAttLocDim(nn.Module):
-  def __init__(self, device, feat_dim=512):
+  def __init__(self, device, feat_dim=512, init=None):
         super(SelfAttLocDim, self).__init__()
         
         self.encoder = SalGan(3, feat_dim)
+        if init:
+            #initlize with salgan
+            print("initalizing with Salgan encoder weights.....")
+            weight = torch.load("./salgan_3dconv_module.pt") 
+            self.encoder.load_state_dict(weight, strict=False)
+            del weight
+
         self.feat_dim = feat_dim
         self.localdim = LocalDistractor(in_channel=512, in_fc=512, out_fc=512)
         self.attention = SelfAttention(in_channel=512, K=8)        
@@ -36,17 +39,24 @@ class SelfAttLocDim(nn.Module):
     
     x, zx = self.encoder(x, layer=4, flag=True) #normalized(x) 
     z = self.encoder(z, layer=1) #maps
-    z = self.attention(zx, z)
+    z, gamma = self.attention(zx, z)
     z_dim = self.localdim(z)
 
-    return x, z_dim 
+    return x, z_dim, gamma 
 
+#for training with only with DIM
 class LocalEncoder(nn.Module):
   
-  def __init__(self, device, feat_dim=512):
+  def __init__(self, device, feat_dim=512, init=None):
         super(LocalEncoder, self).__init__()
         
         self.encoder = SalGan(3, feat_dim)
+        if init:
+            #initlize with salgan
+            print("initalizing with Salgan encoder weights.....")
+            weight = torch.load("./salgan_3dconv_module.pt") 
+            self.encoder.load_state_dict(weight, strict=False)
+            del weight
         self.feat_dim = feat_dim
         self.localdim = LocalDistractor(in_channel=512, in_fc=512, out_fc=512)
         
@@ -54,7 +64,7 @@ class LocalEncoder(nn.Module):
           self.encoder = nn.DataParallel(self.encoder)
           # self.localdim = nn.DataParallel(self.localdim)
 
-  def forward(self, x, z,layer=32):
+  def forward(self, x, z):
     
     x = self.encoder(x, layer=4) #normalized 
     z = self.encoder(z, layer=1) #maps
@@ -89,35 +99,35 @@ class LocalDistractor(nn.Module):
 
 
     return out
+
+# #simple encoder without DIM        
+# class VanillaEncoder(nn.Module):
+
+#     def __init__(self, device, feat_dim=1024):
+#         super(VanillaEncoder, self).__init__()
         
-class VanillaEncoder(nn.Module):
+#         self.encoder = SalGan(3, feat_dim)
+#         self.feat_dim = feat_dim
 
-    def __init__(self, device, feat_dim=1024):
-        super(VanillaEncoder, self).__init__()
-        
-        self.encoder = SalGan(3, feat_dim)
-        self.feat_dim = feat_dim
+#         if device != 'cpu':
+#           self.encoder = nn.DataParallel(self.encoder)
 
-        if device != 'cpu':
-          self.encoder = nn.DataParallel(self.encoder)
+#     def forward(self, x, z):
 
-    def forward(self, x, z):
-
-        return self.encoder(x), self.encoder(z)
+#         return self.encoder(x), self.encoder(z)
 
 class SalGan(nn.Module):
 
-  def __init__(self, in_channel, feat_dim=512):
+  def __init__(self, in_channel=3, feat_dim=512):
     super(SalGan,self).__init__()
 
 
-    original_vgg16 = vgg16()
+    original_vgg16 = vgg16() 
+    encoder = torch.nn.Sequential(*list(original_vgg16.features)[:30])   
     
-    # select only convolutional layers
-      
+    #assemble the full architecture encoder-decoder
+    self.encoder_salgan = torch.nn.Sequential(*(list(encoder.children())))
     
-    # assamble the full architecture encoder-decoder
-    self.salgan = torch.nn.Sequential(*(list(encoder.children())))
     
     #add further blocks
     self.conv_block_5_2 = nn.Sequential(
@@ -129,41 +139,45 @@ class SalGan(nn.Module):
 
     self.fc6 = nn.Sequential(
       # 
-      nn.Linear(512 * 4 * 9, feat_dim),
-      nn.BatchNorm1d(feat_dim),
-      nn.ReLU(inplace=True),
+        nn.Linear(512 * 4 * 9, feat_dim),
+        nn.BatchNorm1d(feat_dim),
+        nn.ReLU(inplace=True),
       )
 
     self.fc7 = nn.Sequential(
       # 
-      nn.Linear(feat_dim, feat_dim),
-      #nn.BatchNorm1d(feat_dim),
-      nn.ReLU(inplace=True),
+        nn.Linear(feat_dim, feat_dim),
+        #nn.BatchNorm1d(feat_dim),
+        nn.ReLU(inplace=True),
       )  
 
     self.l2norm = Normalize(2)
 
   def forward(self, x, layer=1, flag=False):
 
-    out = self.salgan(x)
+    out = self.encoder_salgan(x)
     if flag:
       out_ = out
     if layer==1:
       return out
+    
     out = self.conv_block_5_2(out)
-    
-    
     if layer==2:
       return out
     out = out.view(x.shape[0], -1)
     out = self.fc6(out)
     
     if layer==3:
-      return F.normalize(out, p=2, dim=1)
+      return out
+      # return F.normalize(out, p=2, dim=1)
     
     out = self.fc7(out)
     out = F.normalize(out, p=2, dim=1)
-    return  out, out_        
+    if flag:
+      return  out, out_
+    
+    return out        
+      
     
 class SelfAttention(nn.Module):
 
@@ -200,7 +214,7 @@ class SelfAttention(nn.Module):
     
     out = self.gamma * out + z
 
-    return out 
+    return out , self.gamma
 
 
 class Normalize(nn.Module):
@@ -216,50 +230,62 @@ class Normalize(nn.Module):
 if __name__ =="__main__":
 
 
-  x = torch.rand(3, 512, 10, 20)
-  y = torch.rand(3, 512, 10, 20)
-  model = SelfAttention()
-  g = model(x,y)
-  print(g.size())
+  # x = torch.rand(3, 512, 10, 20)
+  # y = torch.rand(3, 512, 10, 20)
+  model = SelfAttLocDim("gpu", feat_dim=512,init="salgan")
+  # g = model(x,y)
+  # print(g.size())
 
 
-#     # model = Encoder('cuda')
-#     # model = Encoder('cuda') 
-    
-#     """
-#       Keep them
-#     """
-#     # for j, layer in enumerate(model.encoder.module.children()):
-#     #   print(j, layer)
-#     #   try:
-#     #     if (j==0):
-#     #       for i, k in enumerate(layer.modules()):
+    # model = Encoder('cuda')
+    # model = Encoder('cuda') 
+    # model = SalGan(3, 512, "salgan")
+    # weight = torch.load("./salgan_3dconv_module.pt")  
+    # model_dict = model.state_dict()
+    # print(model_dict.keys())
+    # model.load_state_dict(weight, strict=False)
+
+
+    # print(weight.keys())
+    # print(model.salgan.children().items())
+    # for k, v in model.salgan.children():
+    #   print(k)
+
+
+
+    # """
+    #   Keep them
+    # """
+    # for j, layer in enumerate(model.encoder.module.children()):
+    #   print(j, layer)
+    #   try:
+    #     if (j==0):
+    #       for i, k in enumerate(layer.modules()):
             
-#     #           print(i, k)
-#     #           if isinstance(k, nn.Conv2d):
-#     #               k.weight.requires_grad=False
-#     #               k.bias.requires_grad=False
-#     #   except IndexError as e:
-#     #     pass  
+    #           print(i, k)
+    #           if isinstance(k, nn.Conv2d):
+    #               k.weight.requires_grad=False
+    #               k.bias.requires_grad=False
+    #   except IndexError as e:
+    #     pass  
 
-#     weight = torch.load("./salgan_3dconv_module.pt")  
-#     # print(model.encoder.module.encoder_salgan.state_dict())  
-#     # model.encoder.module.encoder_salgan.load_state_dict(weight, strict=False)
-#     # print(model.encoder.module.encoder_salgan.state_dict())  
-#     """
-#     """
+    # # print(model.encoder.module.encoder_salgan.state_dict())  
+    # # model.encoder.module.encoder_salgan.load_state_dict(weight, strict=False)
+    # # print(model.encoder.module.encoder_salgan.state_dict())  
+    # """
+    # """
     
 
 
 
-#     # with torch.no_grad():
-#     cout=0
-#     for k, m in weight.items():
-#       if(k.split('_')[0]=='encoder'):
-#         if(k.split('.')[-1]=='weight'):
-#           print(cout , k, m.size())
-#           cout+=1
-#       # print(i, m)
+    # # with torch.no_grad():
+    # cout=0
+    # for k, m in weight.items():
+    #   if(k.split('_')[0]=='encoder'):
+    #     if(k.split('.')[-1]=='weight'):
+    #       print(cout , k, m.size())
+    #       cout+=1
+    #   # print(i, m)
             
             
             

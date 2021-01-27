@@ -12,6 +12,7 @@ from torch.nn.functional import interpolate
 from torchsummary import summary
 import torch.nn.functional as F
 
+#RESNET50
 
 
 class ResNetEncoder(nn.Module):
@@ -21,10 +22,40 @@ class ResNetEncoder(nn.Module):
     model = torchvision.models.resnet50(pretrained=False, progress=False)
 
     Enc = torch.nn.Sequential(*list(model.children())[:-1])
-    self.encoder1 = torch.nn.Sequential(*list(Enc.children())[:7])
-    self.encoder2 = torch.nn.Sequential(*list(Enc.children())[7:])
+
+    # self.encoder1 = torch.nn.Sequential(*list(Enc.children())[:7])
+    # self.encoder2 = torch.nn.Sequential(*list(Enc.children())[7:])
+
+
+    #---------------------------------
+    encoder1 = torch.nn.Sequential(*list(Enc.children())[:7])
+    encoder2 = torch.nn.Sequential(*list(Enc.children())[7:])
+
+    #--add--a--bottleneck--------------
+    bot_1 = nn.Sequential(
+              nn.Conv2d(1024,512, kernel_size=(1,1), stride=(1,1)),
+              nn.BatchNorm2d(512),
+              nn.Conv2d(512,512, kernel_size=(1,1),stride=(1,1)),
+              nn.BatchNorm2d(512),
+              nn.ReLU()
+        )
+
+    bot_2 = nn.Sequential(
+              nn.Conv2d(512,1024, kernel_size=(1,1), stride=(1,1)),
+              nn.BatchNorm2d(1024),
+              nn.Conv2d(1024,1024, kernel_size=(1,1),stride=(1,1)),
+              nn.BatchNorm2d(1024),
+              nn.ReLU()
+    )
+
+    self.encoder1 = torch.nn.Sequential(*(list(encoder1.children())+list(bot_1.children())))
+    self.encoder2 = torch.nn.Sequential(*(list(bot_2.children())+list(encoder2.children())))
+
+    #---------------------------------
+
     del model
     del Enc
+
     self.fc1 = nn.Linear(in_features=2048, out_features=512)
     self.relu =nn.ReLU()
     self.bnorm = nn.BatchNorm1d(512)
@@ -50,9 +81,10 @@ class SelfAttLocDim(nn.Module):
         self.encoder = ResNetEncoder()
         self.feat_dim = feat_dim
         self.localdim = LocalDistractor(in_channel=512, in_fc=512, out_fc=512)
-        self.attention = SelfAttention(in_channel=1024, K=8)        
+        self.attention = SelfAttention(in_channel=512, K=8)        
         if device != 'cpu':
-           self.encoder = torch.nn.DataParallel(self.encoder)#can do better
+           self.encoder = torch.nn.DataParallel(self.encoder, device_ids=[0, 1])#can do better
+           self.encoder.to(f'cuda:{self.encoder.device_ids[0]}')
           # self.localdim = nn.DataParallel(self.localdim)
 
   def forward(self, x, z):
@@ -95,7 +127,7 @@ class LocalDistractor(nn.Module):
     super(LocalDistractor, self).__init__()
 
     self.fc_net = nn.Linear(in_features=512, out_features=512) #use this to encode f(x), previously this was in salgan encoder follwed by normalization
-    self.f0_conv = nn.Conv2d(in_channels=1024, out_channels=512, kernel_size=(1, 1))
+    self.f0_conv = nn.Conv2d(in_channels=512, out_channels=512, kernel_size=(1, 1))
     self.f1_conv = nn.Conv2d(in_channels=512, out_channels=512, kernel_size=(1, 1))
     self.b_norm = nn.BatchNorm2d(num_features=in_channel) 
     
@@ -121,7 +153,7 @@ class LocalDistractor(nn.Module):
     
 class SelfAttention(nn.Module):
 
-  def __init__(self, in_channel = 1024, K=8):
+  def __init__(self, in_channel = 512, K=8):
     
     super(SelfAttention, self).__init__()
 
@@ -169,16 +201,19 @@ class Normalize(nn.Module):
 # ================== Ends ========
 
 if __name__ =="__main__":
+  model = ResNetEncoder()
 
+  print(*list(model.encoder2.children()))
+  summary(model.encoder2, (512, 10, 20))
 
-  x = torch.rand((4, 3, 160, 320))
-  y = torch.rand((4, 3, 160, 320))
-  model = SelfAttLocDim(device='cuda')
-  model = model.cuda()
-  x = x.cuda()
-  y = y.cuda()
-  g = model(x, y)
-  print(g.size())
+  # x = torch.rand((4, 3, 160, 320))
+  # y = torch.rand((4, 3, 160, 320))
+  # model = SelfAttLocDim(device='cuda')
+  # model = model.cuda()
+  # x = x.cuda()
+  # y = y.cuda()
+  # g = model(x, y)
+  # print(g.size())
 
 
 

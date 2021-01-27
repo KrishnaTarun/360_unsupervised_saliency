@@ -1,9 +1,11 @@
 
+# from model import LocalEncoder, SelfAttention
 import os
 import datetime
 import numpy as np
 import pickle
 import tensorboard_logger as tb_logger
+from torch._C import device
 from torch.utils.tensorboard import SummaryWriter
 import torch
 import torchvision
@@ -21,9 +23,11 @@ from utils import adjust_learning_rate, pil_loader
 from loader import ImageData
 from NCE.memory_bank import* 
 from augment import*
+import model_vgg
+import model_res
 # from model import*
-from model_res import*
-from cosine_annealing import CosineAnnealingWarmUpRestarts
+
+# from cosine_annealing import CosineAnnealingWarmUpRestarts
 import argparse
 # from utils
 
@@ -41,14 +45,14 @@ def parse_options():
     parser.add_argument('--print_freq', type=int, default=50, help='print frequency in steps')
     parser.add_argument('--tb_freq', type=int, default=50, help='tb frequency in steps')
     parser.add_argument('--save_freq', type=int, default=1, help='save frequency in epoch')
-    parser.add_argument('--batch_size', type=int, default=25, help='batch_size')
+    parser.add_argument('--batch_size', type=int, default=20, help='batch_size')
     parser.add_argument('--num_workers', type=int, default=0, help='num of workers to use')
     parser.add_argument('--epochs', type=int, default=250, help='number of training epochs')
 
     # optimization
     parser.add_argument('--optimizer_type', type=str, default='SGD', choices=['SGD', 'Adam'])
     parser.add_argument('--learning_rate', type=float, default=0.01, help='learning rate')
-    parser.add_argument('--lr_decay_epochs', type=str, default='120, 200', help='where to decay lr, can be a list')
+    parser.add_argument('--lr_decay_epochs', type=str, default='120, 220', help='where to decay lr, can be a list')
     parser.add_argument('--lr_decay_rate', type=float, default=0.1, help='decay rate for learning rate')
     parser.add_argument('--beta1', type=float, default=0.9, help='beta1 for adam')
     parser.add_argument('--beta2', type=float, default=0.999, help='beta2 for Adam')
@@ -60,8 +64,11 @@ def parse_options():
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                         help='path to latest checkpoint (default: none)')
 
-    # encoder type
-    parser.add_argument('--encode_type', default='Local', type=str, choices=['Vanilla', 'Local'])
+    # model type
+    parser.add_argument('--model_type', default='resnet', type=str, choices=['vgg', 'resnet'])
+    parser.add_argument('--encode_type', default='selfatt', type=str, choices=['dim', 'selfatt']) #self attention is complete model (includes dim)
+    parser.add_argument('--init_type', default='random', type=str, choices=['salgan', 'random'])
+    parser.add_argument('--lmda', default=0.7, type=float, help='ranges between 0 and 1')
 
     # model definition
     parser.add_argument('--softmax', action='store_true', help='using softmax contrastive loss rather than NCE')
@@ -99,13 +106,28 @@ def parse_options():
         opt.lr_decay_epochs.append(int(it))
 
     opt.method = 'softmax' if opt.softmax else 'nce'
-    opt.model_name = 'encode_{}_init_{}_memory_{}_{}_lr_{}_decay_{}_bsz_{}_optim_{}'.format(opt.encode_type, opt.init,opt.method, opt.nce_k, opt.learning_rate,
-                                                                    opt.weight_decay, opt.batch_size, opt.optimizer_type)
+    # opt.model_name = 'encode_{}_init_{}_memory_{}_{}_lr_{}_decay_{}_bsz_{}_optim_{}'.format(opt.encode_type, opt.init,opt.method, opt.nce_k, opt.learning_rate,
+    #                                                                 opt.weight_decay, opt.batch_size, opt.optimizer_type)
+
+    if opt.model_type=="resnet":
+        opt.encode_type='selfatt'
+        opt.init_type='random'
+        
+    opt.model_name = 'model_{}_encode_{}_init_{}_lambda_{}_bsz_{}'.format(opt.model_type,
+                                                                          opt.encode_type,
+                                                                          opt.init_type,
+                                                                          opt.lmda,
+                                                                          opt.batch_size)
 
     if opt.amp:
         opt.model_name = '{}_amp_{}'.format(opt.model_name, opt.opt_level)
 
-    opt.model_folder = os.path.join(opt.model_path, opt.model_name)
+    opt.model_folder = os.path.join(opt.model_path,
+                                    opt.model_type,
+                                    opt.encode_type,
+                                    opt.init_type,
+                                    opt.model_name)
+
     if not os.path.isdir(opt.model_folder):
         os.makedirs(opt.model_folder)
 
@@ -146,13 +168,29 @@ def init_model(args, n_data):
     #set device
     #need to change in case of multiple-GPUS
     #=====================================================================
-    device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
-    #-----------remove this--------
-    #device = torch.device('cpu')
-    if args.encode_type =='Local':
-        # localdim = LocalDistractor(in_channel=512, in_fc=512, out_fc=512)
-        # net = LocalEncoder(device, args.feat_dim)
-        net = SelfAttLocDim(device, args.feat_dim)
+    
+
+    if args.model_type=="resnet":
+        
+        net = model_res.SelfAttLocDim(args.device, args.feat_dim)
+    
+    if args.model_type=="vgg":
+        
+        init=None
+        if args.init_type=="salgan":
+            init="salgan"
+        if args.encode_type=="dim":
+            net = model_vgg.LocalEncoder(args.device, args.feat_dim, init=init)
+        elif args.encode_type=="selfatt":
+            net = model_vgg.SelfAttLocDim(args.device, args.feat_dim, init=init)
+    
+
+
+
+    # if args.encode_type =='Local':
+    #     # localdim = LocalDistractor(in_channel=512, in_fc=512, out_fc=512)
+    #     # net = LocalEncoder(device, args.feat_dim)
+    #     net = SelfAttLocDim(device, args.feat_dim)
  
 
     # contrast = MemOps(args.feat_dim,\
@@ -170,7 +208,7 @@ def init_model(args, n_data):
     # nce_l1 =  NCECriterion  
     
     #-------------------------
-    net = net.to(device)
+    net = net.to(args.device)
     # contrast = contrast.to(device)
     # nce_l1 = nce_l1.to(device)
     # nce_l2 = nce_l2.to(device)
@@ -182,7 +220,7 @@ def init_model(args, n_data):
         cudnn.benchmark = True
     #======================================================================    
 
-    return net, contrast, nce_l1, nce_l2, device
+    return net, contrast, nce_l1, nce_l2
 #-------------------------------------------------------------------------
 def init_optimizer(args, net):
     
@@ -212,7 +250,8 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, scheduler, arg
     for epoch in range(args.start_epoch, args.epochs+1):
 
         #adjust learning rate
-        adjust_learning_rate(epoch, args, optimizer)
+        if not args.model_type=="resnet":
+            adjust_learning_rate(epoch, args, optimizer)
         # scheduler.step(epoch)
         # adjust_learning_rate(epoch, args, optimizer1)
 
@@ -228,17 +267,18 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, scheduler, arg
             # torchvision.utils.save_image(torchvision.utils.make_grid(z, nrow=10), 
             #                              fp='f.jpg')    
             
-            x, xt  = x.cuda(), xt.cuda()  
+            x, xt  = x.to(args.device), xt.to(args.device)  
             
-            index = index.cuda().long()
+            index = index.long().to(args.device)
             
             # input_ = torch.cat((x.unsqueeze(0), xt.unsqueeze(0)), dim=0)
             # print(input_.size(), input_.is_cuda)
 
             #-------forward---------------
-            
-            f, ft, gamma  = net(x, xt)
-            
+            if args.encode_type=='selfatt':
+                f, ft, gamma  = net(x, xt)
+            else:
+                f, ft= net(x, xt)
             #  print(f[0].m()) 
             #--------loss-----------------
             
@@ -247,7 +287,7 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, scheduler, arg
 
             #----------batch_loss---------
             #lambda*l1 + (1-lambda)*l2
-            loss = (0.3)*infonce_1 + (0.7)*infonce_2
+            loss = (1-args.lmda)*infonce_1 + (args.lmda)*infonce_2
             # loss = infonce_2
 
             #-----------backward----------
@@ -272,7 +312,8 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, scheduler, arg
                 args.logger.log_value('total_loss', loss.item(), steps)
                 args.logger.log_value('loss_nce1', infonce_1.item(), steps)
                 args.logger.log_value('loss_nce2', infonce_2.item(), steps)
-                args.logger.log_value('Gamma', gamma.item(), steps)
+                if args.encode_type=="selfatt":
+                    args.logger.log_value('Gamma', gamma.item(), steps)
                 
                 #TODO
                 
@@ -319,7 +360,7 @@ def main():
     #set parser
     args = parse_options()
     #data loader
-    
+    args.device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
     train_loader, n_data = get_data_loader(args)
    
        
@@ -328,7 +369,7 @@ def main():
                       else args.epochs*(int(n_data/args.batch_size)+1)  
 
     #get model
-    net, contrast, nce_l1, nce_l2, args.device = init_model(args,n_data)
+    net, contrast, nce_l1, nce_l2 = init_model(args,n_data)
 
     #get optimizer
     optimizer, scheduler = init_optimizer(args, net)
