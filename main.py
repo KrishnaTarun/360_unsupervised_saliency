@@ -45,20 +45,20 @@ def parse_options():
     parser.add_argument('--print_freq', type=int, default=50, help='print frequency in steps')
     parser.add_argument('--tb_freq', type=int, default=50, help='tb frequency in steps')
     parser.add_argument('--save_freq', type=int, default=1, help='save frequency in epoch')
-    parser.add_argument('--batch_size', type=int, default=20, help='batch_size')
+    parser.add_argument('--batch_size', type=int, default=10, help='batch_size')
     parser.add_argument('--num_workers', type=int, default=0, help='num of workers to use')
     parser.add_argument('--epochs', type=int, default=250, help='number of training epochs')
 
     # optimization
     parser.add_argument('--optimizer_type', type=str, default='SGD', choices=['SGD', 'Adam'])
     parser.add_argument('--learning_rate', type=float, default=0.01, help='learning rate')
-    parser.add_argument('--lr_decay_epochs', type=str, default='120, 220', help='where to decay lr, can be a list')
+    parser.add_argument('--lr_decay_epochs', type=str, default='120', help='where to decay lr, can be a list')
     parser.add_argument('--lr_decay_rate', type=float, default=0.1, help='decay rate for learning rate')
     parser.add_argument('--beta1', type=float, default=0.9, help='beta1 for adam')
     parser.add_argument('--beta2', type=float, default=0.999, help='beta2 for Adam')
     parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
-    parser.add_argument('--init', type=str, default='rand', choices= ['salgan', 'rand', 'vgg'], help='Initializing model')
+    # parser.add_argument('--init', type=str, default='rand', choices= ['salgan', 'rand', 'vgg'], help='Initializing model')
 
     # resume path
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
@@ -110,7 +110,7 @@ def parse_options():
     #                                                                 opt.weight_decay, opt.batch_size, opt.optimizer_type)
 
     if opt.model_type=="resnet":
-        opt.encode_type='selfatt'
+        # opt.encode_type='selfatt'
         opt.init_type='random'
         
     opt.model_name = 'model_{}_encode_{}_init_{}_lambda_{}_bsz_{}'.format(opt.model_type,
@@ -171,8 +171,14 @@ def init_model(args, n_data):
     
 
     if args.model_type=="resnet":
+
+        if args.encode_type=="dim":
+            net = model_res.LocalEncoder(args.device, args.feat_dim)
+        elif args.encode_type=="selfatt":
+            net = model_res.SelfAttLocDim(args.device, args.feat_dim)
+
         
-        net = model_res.SelfAttLocDim(args.device, args.feat_dim)
+        # net = model_res.SelfAttLocDim(args.device, args.feat_dim)
     
     if args.model_type=="vgg":
         
@@ -287,7 +293,7 @@ def train(train_loader, net, contrast, nce_l1, nce_l2, optimizer, scheduler, arg
 
             #----------batch_loss---------
             #lambda*l1 + (1-lambda)*l2
-            loss = (1-args.lmda)*infonce_1 + (args.lmda)*infonce_2
+            loss = (1.0-args.lmda)*infonce_1 + 1.0*(args.lmda)*infonce_2
             # loss = infonce_2
 
             #-----------backward----------

@@ -191,7 +191,7 @@ class SelfAttention(nn.Module):
     self.key_ =  nn.Conv2d(in_channels=in_channel, out_channels=int(in_channel/K), kernel_size = (1,1))
     self.val_ =  nn.Conv2d(in_channels=in_channel, out_channels= int(in_channel/2), kernel_size = (1,1))
     self.out  =  nn.Conv2d(in_channels=int(in_channel/2), out_channels=in_channel, kernel_size = (1,1))
-    self.gamma = nn.Parameter(torch.zeros(1))
+    self.gamma = nn.Parameter(torch.zeros(1)).float()
 
     self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
 

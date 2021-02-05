@@ -56,18 +56,27 @@ class ResNetEncoder(nn.Module):
     del model
     del Enc
 
-    self.fc1 = nn.Linear(in_features=2048, out_features=512)
     self.relu =nn.ReLU()
+    self.fc1 = nn.Linear(in_features=2048, out_features=512)
     self.bnorm = nn.BatchNorm1d(512)
+    self.fc2 = nn.Linear(in_features=512, out_features=512)
 
-  def forward(self, in_, flag='map'):
+  def forward(self, in_, flag='map', layer=None):
       
       
-      #No Normalization in this module
+      #Normalization added in this module just like vgg
       if flag =='fc_map':
         Zx = self.encoder1(in_)
         fx  = F.relu(self.bnorm(self.fc1(self.encoder2(Zx).view(in_.size()[0],-1).contiguous())))
+        fx = F.relu(self.fc2(fx))
+        fx = F.normalize(fx, p=2, dim=1)
+        if layer:
+          #return only normalized x
+          return fx
         return fx, Zx
+
+      # if flag=="fc":
+      #   return 
 
       if flag=='map':
         Zt = self.encoder1(in_)
@@ -93,32 +102,31 @@ class SelfAttLocDim(nn.Module):
     z = self.encoder(z, flag = 'map')
 
     z, gamma = self.attention(zx, z)
-    x_dim, z_dim = self.localdim(x, z)
+    z_dim = self.localdim(z)
 
-    return x_dim, z_dim, gamma 
+    return x, z_dim, gamma 
 
-#TODO (uncomment) without self attention--> look into it inorder to run without self attention
-# class LocalEncoder(nn.Module):
-#     #pass your resnet model in here
-#   def __init__(self, device, feat_dim=512):
-#         super(LocalEncoder, self).__init__()
+class LocalEncoder(nn.Module):
+    #pass your resnet model in here
+  def __init__(self, device, feat_dim=512):
+        super(LocalEncoder, self).__init__()
         
-#         self.encoder = ResNetEncoder(3, feat_dim)
-#         self.feat_dim = feat_dim
-#         self.localdim = LocalDistractor(in_channel=512, in_fc=512, out_fc=512)
+        self.encoder = ResNetEncoder()
+        self.feat_dim = feat_dim
+        self.localdim = LocalDistractor(in_channel=512, in_fc=512, out_fc=512)
         
-#         if device != 'cpu':
-#           self.encoder = nn.DataParallel(self.encoder)
-#           # self.localdim = nn.DataParallel(self.localdim)
+        if device != 'cpu':
+          self.encoder = nn.DataParallel(self.encoder)
+          # self.localdim = nn.DataParallel(self.localdim)
 
-#   def forward(self, x, z,layer=32):
+  def forward(self, x, z):
     
-#     x = self.encoder(x, layer=4) #normalized 
-#     z = self.encoder(z, layer=1) #maps
+    x = self.encoder(x, flag = 'fc_map',layer=True) #normalized fx
+    z = self.encoder(z, flag = 'map') #maps
 
-#     z_dim = self.localdim(x, z)
+    z_dim = self.localdim(z)
 
-#     return x, z_dim 
+    return x, z_dim 
 
 class LocalDistractor(nn.Module):
   
@@ -126,19 +134,19 @@ class LocalDistractor(nn.Module):
   def __init__(self, in_channel=512, in_fc=512, out_fc=512):
     super(LocalDistractor, self).__init__()
 
-    self.fc_net = nn.Linear(in_features=512, out_features=512) #use this to encode f(x), previously this was in salgan encoder follwed by normalization
+    # self.fc_net = nn.Linear(in_features=512, out_features=512) #use this to encode f(x), previously this was in salgan encoder follwed by normalization
     self.f0_conv = nn.Conv2d(in_channels=512, out_channels=512, kernel_size=(1, 1))
     self.f1_conv = nn.Conv2d(in_channels=512, out_channels=512, kernel_size=(1, 1))
     self.b_norm = nn.BatchNorm2d(num_features=in_channel) 
     
 
     
-  def forward(self, x, z):
+  def forward(self, z):
     
     b, C, h, w = z.size()
     
-    out0 = F.relu(self.fc_net(x))
-    out0 = F.normalize(out0, p=2, dim=1) #Normalization of g(f(x))
+    # out0 = F.relu(self.fc_net(x))
+    # out0 = F.normalize(out0, p=2, dim=1) #Normalization of g(f(x))
 
     out = F.relu(self.f0_conv(z))
     out = F.relu(self.b_norm(self.f1_conv(out)))
@@ -148,7 +156,7 @@ class LocalDistractor(nn.Module):
     # x = F.relu(self.fc_net(x))
 
 
-    return out0, out
+    return out
         
     
 class SelfAttention(nn.Module):
