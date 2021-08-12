@@ -10,7 +10,7 @@ In order to train the Encoder suitable for the downstream task, run:
     
 #### Dataset
 
-The unlabelled data used for training encoder and as reported in the paper can be downloaded from here [click](https://drive.google.com/file/d/1QtxRurC0ac5Aksywg1XDRfUMg64fEIqr/view?usp=sharing). Make sure to follow this hierarchy for data: data/Train/images/ or otherwise change the code accordingly. Under *images* you have all your jpg images.
+The unlabelled data used for training encoder and as reported in the paper can be downloaded from here [click](https://drive.google.com/file/d/1QtxRurC0ac5Aksywg1XDRfUMg64fEIqr/view?usp=sharing). Make sure to follow this hierarchy for data: data/Train/images/ or otherwise change the code accordingly. Under *images* you have all your .jpg images.
 
 #### Pre-Trained models
  - [VGG](https://drive.google.com/file/d/1f-nk2O66sZc-LVpi2o8tJkV1yQhztEtg/view?usp=sharing)
