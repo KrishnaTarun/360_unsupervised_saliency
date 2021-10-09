@@ -17,7 +17,7 @@ The unlabelled data used for training encoder and as reported in the paper can b
  - [ResNet](https://drive.google.com/file/d/1VQY1KKPL5gBq6gycZmDC6j0WgDB6Xqot/view?usp=sharing)
  
  
- ##Please consider citing the following paper if you find this work useful for your research.
+ #### Please consider citing the following paper if you find this work useful for your research.
  
     @InProceedings{Djilali_2021_ICCV,
     author    = {Djilali, Yasser Abdelaziz Dahou and Krishna, Tarun and McGuinness, Kevin and O'Connor, Noel E.},
