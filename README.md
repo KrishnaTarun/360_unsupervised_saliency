@@ -1,4 +1,4 @@
-# Rethinking 360 Image Visual Attention Modelling with Unsupervised Learning.
+# Rethinking 360 Image Visual Attention Modelling with Unsupervised Learning (ICCV 2021).
 
 
 ### Contrastive Learning
